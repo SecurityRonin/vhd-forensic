@@ -45,8 +45,25 @@ impl VhdReader {
     ///
     /// Returns [`VhdError`] if the file is not a valid VHD, or if it is a
     /// Differencing disk (parent resolution is not supported).
-    pub fn open(_path: &Path) -> Result<Self, VhdError> {
-        todo!("implement VhdReader::open")
+    pub fn open(path: &Path) -> Result<Self, VhdError> {
+        let data = std::fs::read(path)?;
+        let footer = footer::VhdFooter::parse(&data)?;
+
+        let (inner, virtual_disk_size) = match footer.disk_type {
+            footer::DiskType::Fixed => {
+                let file = std::fs::File::open(path)?;
+                (VhdInner::Fixed { file }, footer.current_size)
+            }
+            footer::DiskType::Dynamic => {
+                let dyn_hdr = dynamic::DynamicHeader::parse(&data, footer.data_offset)?;
+                let bat = dynamic::BlockAllocationTable::parse(&data, &dyn_hdr)?;
+                let file = std::fs::File::open(path)?;
+                let size = footer.current_size;
+                (VhdInner::Dynamic { file, bat, block_size: dyn_hdr.block_size }, size)
+            }
+        };
+
+        Ok(VhdReader { inner, pos: 0, virtual_disk_size })
     }
 
     /// Virtual disk size in bytes as recorded in the VHD footer.
@@ -64,8 +81,43 @@ impl VhdReader {
 }
 
 impl Read for VhdReader {
-    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-        todo!("implement VhdReader::read")
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos >= self.virtual_disk_size || buf.is_empty() {
+            return Ok(0);
+        }
+        let remaining = (self.virtual_disk_size - self.pos) as usize;
+        let to_read = buf.len().min(remaining);
+
+        match &mut self.inner {
+            VhdInner::Fixed { file } => {
+                file.seek(SeekFrom::Start(self.pos))?;
+                let n = file.read(&mut buf[..to_read])?;
+                self.pos += n as u64;
+                Ok(n)
+            }
+            VhdInner::Dynamic { file, bat, block_size } => {
+                let block_size_u64 = u64::from(*block_size);
+                let block_end = ((self.pos / block_size_u64) + 1) * block_size_u64;
+                let chunk = to_read.min((block_end - self.pos) as usize);
+
+                match bat.file_offset_for_byte(self.pos)
+                    .map_err(|e| std::io::Error::other(e.to_string()))?
+                {
+                    Some(file_off) => {
+                        file.seek(SeekFrom::Start(file_off))?;
+                        let n = file.read(&mut buf[..chunk])?;
+                        self.pos += n as u64;
+                        Ok(n)
+                    }
+                    None => {
+                        // Sparse block — return zeroes.
+                        buf[..chunk].fill(0);
+                        self.pos += chunk as u64;
+                        Ok(chunk)
+                    }
+                }
+            }
+        }
     }
 }
 
