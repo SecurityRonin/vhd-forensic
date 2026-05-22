@@ -1,0 +1,22 @@
+[package]
+name         = "vhd"
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.85"
+description  = "Pure-Rust read-only legacy VHD (Virtual PC) disk image reader"
+license      = "MIT"
+repository   = "https://github.com/SecurityRonin/vhd"
+homepage     = "https://github.com/SecurityRonin/vhd"
+documentation = "https://docs.rs/vhd"
+authors      = ["Albert Hui"]
+keywords     = ["forensics", "vhd", "disk-image", "windows", "container"]
+categories   = ["parser-implementations", "filesystem"]
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
