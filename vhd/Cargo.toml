@@ -12,6 +12,10 @@ authors      = ["Albert Hui"]
 keywords     = ["forensics", "vhd", "disk-image", "windows", "container"]
 categories   = ["parser-implementations", "filesystem"]
 
+[features]
+# Expose test helper constructors for use in downstream crate tests.
+test-helpers = []
+
 [dependencies]
 thiserror = { workspace = true }
 

@@ -93,7 +93,7 @@ fn checksum(footer: &[u8]) -> u32 {
 ///
 /// Sets the cookie, version, current_size, disk_type=Fixed, data_offset=0xFFFF,
 /// and a valid checksum. All other fields are zeroed.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub fn test_fixed_footer(virtual_size: u64) -> Vec<u8> {
     let mut footer = vec![0u8; FOOTER_SIZE];
 

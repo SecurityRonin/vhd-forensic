@@ -14,8 +14,12 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 mod error;
-mod footer;
 mod dynamic;
+
+#[cfg(feature = "test-helpers")]
+pub mod footer;
+#[cfg(not(feature = "test-helpers"))]
+mod footer;
 
 pub use error::VhdError;
 pub use footer::{DiskType, VhdFooter};
