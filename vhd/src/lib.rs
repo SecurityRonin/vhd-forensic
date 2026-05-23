@@ -312,4 +312,51 @@ mod tests {
             assert_eq!(buf, ref_data[end..end + 512], "byte mismatch near end");
         }
     }
+
+    // ── Corpus differential tests: real qemu-img generated VHDs ──────────────
+
+    fn corpus_vhd_matches_raw(corpus: &Path) {
+        const QEMU_IMG: &str = "/opt/homebrew/bin/qemu-img";
+        if !Path::new(QEMU_IMG).exists() || !corpus.exists() {
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ref_path = tmp.path().join("reference.raw");
+        let ok = std::process::Command::new(QEMU_IMG)
+            .args(["convert", "-O", "raw",
+                   corpus.to_str().unwrap(),
+                   ref_path.to_str().unwrap()])
+            .status().expect("spawn qemu-img").success();
+        assert!(ok, "qemu-img convert failed for {}", corpus.display());
+        let ref_data = std::fs::read(&ref_path).expect("read raw");
+
+        let mut reader = VhdReader::open(corpus).expect("open");
+        let vhd_size = reader.virtual_disk_size() as usize;
+        assert_eq!(vhd_size, ref_data.len(),
+            "virtual_disk_size mismatch for {}", corpus.display());
+
+        let step = 65536usize;
+        let mut offset = 0usize;
+        while offset < vhd_size {
+            let len = 512.min(vhd_size - offset);
+            let mut buf = vec![0u8; len];
+            reader.seek(SeekFrom::Start(offset as u64)).expect("seek");
+            reader.read_exact(&mut buf).expect("read");
+            assert_eq!(buf, ref_data[offset..offset + len],
+                "byte mismatch at {offset:#x} in {}", corpus.display());
+            offset += step;
+        }
+    }
+
+    #[test]
+    fn corpus_minimal_vhd_reads_match_qemu_raw_convert() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/minimal.vhd");
+        corpus_vhd_matches_raw(&p);
+    }
+
+    #[test]
+    fn corpus_fixed_vhd_reads_match_qemu_raw_convert() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/fixed.vhd");
+        corpus_vhd_matches_raw(&p);
+    }
 }
