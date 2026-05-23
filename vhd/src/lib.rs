@@ -244,4 +244,72 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<VhdReader>();
     }
+
+    // ── Differential test: bytes must match qemu-img convert -O raw output ────
+    //
+    // VHD uses CHS geometry, so the virtual size gets rounded from the source.
+    // Strategy: raw → VHD → raw_reference (both via qemu-img), then compare
+    // our reader output against raw_reference. qemu-img is authoritative for
+    // both conversions; we need not predict the CHS-rounded size ourselves.
+
+    #[test]
+    fn reads_match_qemu_raw_convert() {
+        const QEMU_IMG: &str = "/opt/homebrew/bin/qemu-img";
+        if !Path::new(QEMU_IMG).exists() {
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // 1 MiB source with a deterministic non-trivial pattern.
+        let size: usize = 1 << 20;
+        let source_data: Vec<u8> = (0..size).map(|i| (i ^ (i >> 8)) as u8).collect();
+        let raw_path = tmp.path().join("source.raw");
+        std::fs::write(&raw_path, &source_data).expect("write raw");
+
+        // raw → VHD (dynamic, qemu default VPC format).
+        let vhd_path = tmp.path().join("test.vhd");
+        let ok = std::process::Command::new(QEMU_IMG)
+            .args(["convert", "-O", "vpc",
+                   raw_path.to_str().unwrap(),
+                   vhd_path.to_str().unwrap()])
+            .status().expect("spawn qemu-img").success();
+        assert!(ok, "qemu-img raw→vpc failed");
+
+        // VHD → reference raw (qemu-img resolves CHS rounding authoritatively).
+        let ref_path = tmp.path().join("reference.raw");
+        let ok = std::process::Command::new(QEMU_IMG)
+            .args(["convert", "-O", "raw",
+                   vhd_path.to_str().unwrap(),
+                   ref_path.to_str().unwrap()])
+            .status().expect("spawn qemu-img").success();
+        assert!(ok, "qemu-img vpc→raw failed");
+        let ref_data = std::fs::read(&ref_path).expect("read reference raw");
+
+        let mut reader = VhdReader::open(&vhd_path).expect("open vhd");
+        let vhd_size = reader.virtual_disk_size() as usize;
+        assert_eq!(vhd_size, ref_data.len(),
+            "virtual_disk_size must match qemu-img reference raw size");
+
+        // Sample every 64 KiB (covers block boundaries) plus near-end.
+        let step = 65536usize;
+        let mut offset = 0usize;
+        while offset < vhd_size {
+            let len = 512.min(vhd_size - offset);
+            let mut buf = vec![0u8; len];
+            reader.seek(SeekFrom::Start(offset as u64)).expect("seek");
+            reader.read_exact(&mut buf).expect("read");
+            assert_eq!(
+                buf, ref_data[offset..offset + len],
+                "byte mismatch at offset {offset:#x}",
+            );
+            offset += step;
+        }
+        if vhd_size >= 512 {
+            let end = vhd_size - 512;
+            let mut buf = vec![0u8; 512];
+            reader.seek(SeekFrom::Start(end as u64)).expect("seek near-end");
+            reader.read_exact(&mut buf).expect("read near-end");
+            assert_eq!(buf, ref_data[end..end + 512], "byte mismatch near end");
+        }
+    }
 }
