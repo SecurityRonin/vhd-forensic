@@ -78,7 +78,7 @@ Exercises: fixed-image direct sector reads (no BAT), footer-only header parse.
 | Fixed VHD (raw + footer) | Yes | `fixed.vhd` (QEMU) + `ntfs_fixed.vhd` (Windows) |
 | Windows/Hyper-V-created VHD | Yes | `ntfs_fixed.vhd` (third-party) |
 | Unallocated blocks (zeros) | Yes | minimal.vhd sparse regions |
-| Block bitmap skip (+512) | Yes | mandatory for dynamic blocks |
+| Block bitmap skip (computed from block_size) | Yes | fixed: was hardcoded to +512 bytes, now computed per spec |
 | One's-complement checksum | Yes | parsed and validated on open |
 | Differencing VHD | No | not in current corpus |
 | CHS geometry rounding quirk | Yes (implicit) | QEMU uses `file_size/512`; our reader matches |
