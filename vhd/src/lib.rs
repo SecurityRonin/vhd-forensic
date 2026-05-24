@@ -245,6 +245,51 @@ mod tests {
         assert_send::<VhdReader>();
     }
 
+    // ── block_size=0 in dynamic header must be rejected, not panic ────────────
+    //
+    // A crafted dynamic VHD with block_size=0 causes div-by-zero in:
+    //   file_offset_for_byte: virtual_byte / block_size
+    //   Read::read: self.pos / block_size_u64
+    // open() must return Err before reaching those sites.
+    #[test]
+    fn dynamic_vhd_block_size_zero_rejected() {
+        use std::io::Write;
+
+        const BLOCK_SIZE: u64 = 0; // deliberately invalid
+        let mut file = vec![0u8; 4096];
+
+        let footer = {
+            let mut f = vec![0u8; 512];
+            f[0..8].copy_from_slice(b"conectix");
+            f[8..12].copy_from_slice(&0x0000_0002u32.to_be_bytes());
+            f[12..16].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+            f[16..24].copy_from_slice(&512u64.to_be_bytes());
+            f[32..40].copy_from_slice(&(512u64).to_be_bytes()); // original_size
+            f[40..48].copy_from_slice(&(512u64).to_be_bytes()); // current_size
+            f[60..64].copy_from_slice(&3u32.to_be_bytes()); // Dynamic
+            let mut s: u32 = 0;
+            for (i, &b) in f.iter().enumerate() {
+                if !(64..68).contains(&i) { s = s.wrapping_add(u32::from(b)); }
+            }
+            f[64..68].copy_from_slice(&(!s).to_be_bytes());
+            f
+        };
+
+        file[0..512].copy_from_slice(&footer);
+        file[3584..4096].copy_from_slice(&footer);
+        file[512..520].copy_from_slice(b"cxsparse");
+        file[512 + 16..512 + 24].copy_from_slice(&1536u64.to_be_bytes());
+        file[512 + 28..512 + 32].copy_from_slice(&1u32.to_be_bytes());
+        file[512 + 32..512 + 36].copy_from_slice(&(BLOCK_SIZE as u32).to_be_bytes()); // 0!
+
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&file).unwrap();
+        assert!(
+            VhdReader::open(tmp.path()).is_err(),
+            "block_size=0 must be rejected at open() to prevent div-by-zero"
+        );
+    }
+
     // ── BITMAP_SECTORS must be computed from block_size, not hardcoded to 1 ────
     //
     // MS-VHD spec §2.3: each dynamic block is preceded by a sector bitmap whose
