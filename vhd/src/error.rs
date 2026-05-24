@@ -20,6 +20,8 @@ pub enum VhdError {
     BatOutOfBounds,
     #[error("block data offset out of bounds")]
     BlockOutOfBounds,
+    #[error("block_size must be > 0")]
+    InvalidBlockSize,
 }
 
 pub type Result<T> = std::result::Result<T, VhdError>;

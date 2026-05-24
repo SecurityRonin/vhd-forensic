@@ -37,6 +37,9 @@ impl DynamicHeader {
         let bat_offset     = u64::from_be_bytes(hdr[16..24].try_into().unwrap());
         let block_size     = u32::from_be_bytes(hdr[32..36].try_into().unwrap());
         let max_bat_entries = u32::from_be_bytes(hdr[28..32].try_into().unwrap());
+        if block_size == 0 {
+            return Err(VhdError::InvalidBlockSize);
+        }
         Ok(DynamicHeader { bat_offset, block_size, max_bat_entries })
     }
 }
