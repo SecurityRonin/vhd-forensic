@@ -245,6 +245,85 @@ mod tests {
         assert_send::<VhdReader>();
     }
 
+    // ── BITMAP_SECTORS must be computed from block_size, not hardcoded to 1 ────
+    //
+    // MS-VHD spec §2.3: each dynamic block is preceded by a sector bitmap whose
+    // size (in sectors) = ((block_size / (8 * 512) + 511) & ~511) / 512.
+    // For the standard 2 MiB block_size this is 1 sector; for 4 MiB it is 2.
+    // Hardcoding BITMAP_SECTORS = 1 causes 4 MiB blocks to be mis-read by exactly
+    // 512 bytes — returning the second bitmap sector instead of the first data sector.
+    #[test]
+    fn bitmap_sectors_computed_for_4mib_block_size() {
+        use std::io::Write;
+
+        // Build a minimal dynamic VHD with block_size = 4 MiB.
+        //
+        // File layout (all offsets in bytes):
+        //   [0..512)   : footer copy (dynamic, data_offset=512, virtual_size=4MiB)
+        //   [512..1536): dynamic header (bat_offset=1536, block_size=4MiB, max_bat_entries=1)
+        //   [1536..2048): BAT (entry 0 = sector 4, padded)
+        //   [2048..2560): block 0 bitmap sector 1 (0xFF — all sectors present)
+        //   [2560..3072): block 0 bitmap sector 2 (0xFF)
+        //   [3072..3584): block 0 data sector 0 (0xAB pattern — the "right" answer)
+        //   [3584..4096): real footer (same as copy)
+
+        const BLOCK_SIZE: u64 = 4 * 1024 * 1024;
+        let mut file = vec![0u8; 4096];
+
+        // Footer builder (dynamic disk type).
+        let footer = {
+            let mut f = vec![0u8; 512];
+            f[0..8].copy_from_slice(b"conectix");
+            f[8..12].copy_from_slice(&0x0000_0002u32.to_be_bytes()); // features
+            f[12..16].copy_from_slice(&0x0001_0000u32.to_be_bytes()); // file format version
+            f[16..24].copy_from_slice(&512u64.to_be_bytes()); // data_offset → dynamic header
+            f[32..40].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // original_size
+            f[40..48].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // current_size
+            f[60..64].copy_from_slice(&3u32.to_be_bytes()); // disk_type = Dynamic
+            // One's-complement checksum (bytes 64-67 zeroed during computation).
+            let mut s: u32 = 0;
+            for (i, &b) in f.iter().enumerate() {
+                if !(64..68).contains(&i) { s = s.wrapping_add(u32::from(b)); }
+            }
+            f[64..68].copy_from_slice(&(!s).to_be_bytes());
+            f
+        };
+
+        file[0..512].copy_from_slice(&footer);      // footer copy
+        file[3584..4096].copy_from_slice(&footer);  // real footer at end
+
+        // Dynamic header (bat_offset=1536, block_size=4MiB, max_bat_entries=1).
+        file[512..520].copy_from_slice(b"cxsparse");
+        file[512 + 16..512 + 24].copy_from_slice(&1536u64.to_be_bytes()); // bat_offset
+        file[512 + 28..512 + 32].copy_from_slice(&1u32.to_be_bytes());    // max_bat_entries
+        file[512 + 32..512 + 36].copy_from_slice(&(BLOCK_SIZE as u32).to_be_bytes()); // block_size
+
+        // BAT: entry 0 = sector 4 (byte 2048 = start of block 0).
+        file[1536..1540].copy_from_slice(&4u32.to_be_bytes());
+
+        // Block 0 bitmap: 2 sectors × 0xFF (all 512-byte sectors present).
+        file[2048..2560].fill(0xFF); // bitmap sector 1
+        file[2560..3072].fill(0xFF); // bitmap sector 2
+
+        // Block 0 data: known sentinel. The test asserts this is what we read.
+        // With BITMAP_SECTORS=1 (bug), the reader skips only 1 sector and reads
+        // bytes [2560..3072) which are 0xFF (bitmap) — mismatch.
+        file[3072..3584].fill(0xAB);
+
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&file).unwrap();
+
+        let mut reader = VhdReader::open(tmp.path()).expect("open synthetic 4MiB-block vhd");
+        let mut buf = [0u8; 512];
+        reader.seek(SeekFrom::Start(0)).unwrap();
+        reader.read_exact(&mut buf).expect("read block 0 data sector 0");
+        assert_eq!(
+            buf, [0xABu8; 512],
+            "with 4 MiB block_size, bitmap is 2 sectors (1024 bytes); \
+             BITMAP_SECTORS must not be hardcoded to 1"
+        );
+    }
+
     // ── Differential test: bytes must match qemu-img convert -O raw output ────
     //
     // VHD uses CHS geometry, so the virtual size gets rounded from the source.
