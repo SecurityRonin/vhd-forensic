@@ -332,13 +332,21 @@ mod tests {
 
         let mut reader = VhdReader::open(corpus).expect("open");
         let vhd_size = reader.virtual_disk_size() as usize;
-        assert_eq!(vhd_size, ref_data.len(),
-            "virtual_disk_size mismatch for {}", corpus.display());
+        // qemu's vpc driver computes total_sectors = file_size / 512 for fixed
+        // VHDs, treating the 512-byte footer as a trailing data sector.
+        // Our reader follows the spec: virtual_disk_size = current_size (data only).
+        // Accept ref_data being exactly vhd_size OR vhd_size + 512.
+        assert!(
+            ref_data.len() == vhd_size || ref_data.len() == vhd_size + 512,
+            "unexpected ref raw size {} vs vhd_size {} for {}",
+            ref_data.len(), vhd_size, corpus.display(),
+        );
+        let cmp_size = vhd_size; // never compare footer bytes
 
         let step = 65536usize;
         let mut offset = 0usize;
-        while offset < vhd_size {
-            let len = 512.min(vhd_size - offset);
+        while offset < cmp_size {
+            let len = 512.min(cmp_size - offset);
             let mut buf = vec![0u8; len];
             reader.seek(SeekFrom::Start(offset as u64)).expect("seek");
             reader.read_exact(&mut buf).expect("read");
@@ -357,6 +365,18 @@ mod tests {
     #[test]
     fn corpus_fixed_vhd_reads_match_qemu_raw_convert() {
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/fixed.vhd");
+        corpus_vhd_matches_raw(&p);
+    }
+
+    #[test]
+    fn corpus_dfvfs_ntfs_fixed_vhd_reads_match_qemu_raw_convert() {
+        // ntfs_fixed.vhd was created by Windows (creator_app = "win ", version 0x000A0000
+        // = Windows 10 / Hyper-V). It is a fixed-type VHD with an NTFS filesystem,
+        // sourced from the dfvfs project (Apache-2.0):
+        // https://github.com/log2timeline/dfvfs/raw/main/test_data/ntfs-fixed.vhd
+        // SHA-256: 797a3a1ffb1966b634bef79bf4b1e93641545cce8560b1f81d8d2c3f84b00de2
+        // This is NOT QEMU-generated, providing independent cross-implementation validation.
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/ntfs_fixed.vhd");
         corpus_vhd_matches_raw(&p);
     }
 }
