@@ -6,7 +6,15 @@ pub const DYNAMIC_HEADER_COOKIE: &[u8; 8] = b"cxsparse";
 pub const DYNAMIC_HEADER_SIZE: usize = 1024;
 pub const BAT_ENTRY_UNUSED: u32 = 0xFFFF_FFFF;
 /// Sector bitmap size in sectors (always 1 sector = 512 bytes per block).
-pub const BITMAP_SECTORS: u64 = 1;
+/// Compute the bitmap size in sectors for a given block_size (MS-VHD §2.3).
+///
+/// Formula from the spec and QEMU vpc.c:
+///   bitmap_bytes = ((block_size / (8 * 512)) + 511) & !511
+///   bitmap_sectors = bitmap_bytes / 512
+pub fn bitmap_sectors(block_size: u32) -> u64 {
+    let bitmap_bytes = (u64::from(block_size) / (8 * 512) + 511) & !511;
+    bitmap_bytes / 512
+}
 
 /// Parsed dynamic header fields.
 pub struct DynamicHeader {
@@ -68,8 +76,9 @@ impl BlockAllocationTable {
         if bat_entry == BAT_ENTRY_UNUSED {
             return Ok(None);
         }
-        // BAT entry is in 512-byte sectors; each block is preceded by a 1-sector bitmap.
-        let block_file_offset = u64::from(bat_entry) * 512 + BITMAP_SECTORS * 512;
+        // BAT entry is in 512-byte sectors; each block is preceded by a sector bitmap
+        // whose size depends on block_size (see bitmap_sectors()).
+        let block_file_offset = u64::from(bat_entry) * 512 + bitmap_sectors(self.block_size) * 512;
         let offset_in_block = virtual_byte % block_size;
         Ok(Some(block_file_offset + offset_in_block))
     }
