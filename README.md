@@ -73,6 +73,7 @@ Read-only. Differencing disks require parent locator resolution which is out of 
 | [`vhdx`](https://github.com/SecurityRonin/vhdx) | Microsoft VHDX | Hyper-V, Windows 8+, WSL2, Azure — the successor to VHD |
 | [`qcow2`](https://github.com/SecurityRonin/qcow2) | QCOW2 v2/v3 | QEMU / KVM / libvirt disk images |
 | [`dd`](https://github.com/SecurityRonin/dd) | Raw / flat | dd, dcfldd, dc3dd, and FTK Imager raw output |
+| [`iso`](https://github.com/SecurityRonin/iso) | ISO 9660 | Optical disc images: multi-session, UDF bridge, Rock Ridge, Joliet, El Torito |
 
 ### Forensic analysers
 
