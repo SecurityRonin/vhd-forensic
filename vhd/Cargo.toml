@@ -1,11 +1,11 @@
 [package]
 name         = "vhd"
-version      = "0.1.0"
-edition      = "2021"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description  = "Pure-Rust read-only legacy VHD (Virtual PC) disk image reader"
-license      = "MIT"
-repository   = "https://github.com/SecurityRonin/vhd"
+license.workspace = true
+repository.workspace = true
 homepage     = "https://github.com/SecurityRonin/vhd"
 documentation = "https://docs.rs/vhd"
 authors      = ["Albert Hui"]
