@@ -13,8 +13,8 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-mod error;
 mod dynamic;
+mod error;
 
 #[cfg(feature = "test-helpers")]
 pub mod footer;
@@ -23,6 +23,14 @@ mod footer;
 
 pub use error::VhdError;
 pub use footer::{DiskType, VhdFooter};
+
+/// A seekable, thread-safe byte source the reader can sit on: a `File`, an
+/// in-RAM `Cursor`, or a positioned sub-range of a `.zip`. Lets a caller open a
+/// VHD straight out of an archive (no temp-file extraction) via
+/// [`VhdReader::open_reader`], while [`VhdReader::open`] keeps the file-path
+/// convenience.
+pub trait ReadSeekSend: Read + Seek + Send + Sync {}
+impl<T: Read + Seek + Send + Sync> ReadSeekSend for T {}
 
 /// Read-only VHD container reader.
 ///
@@ -63,11 +71,32 @@ impl VhdReader {
                 let bat = dynamic::BlockAllocationTable::parse(&data, &dyn_hdr)?;
                 let file = std::fs::File::open(path)?;
                 let size = footer.current_size;
-                (VhdInner::Dynamic { file, bat, block_size: dyn_hdr.block_size }, size)
+                (
+                    VhdInner::Dynamic {
+                        file,
+                        bat,
+                        block_size: dyn_hdr.block_size,
+                    },
+                    size,
+                )
             }
         };
 
-        Ok(VhdReader { inner, pos: 0, virtual_disk_size })
+        Ok(VhdReader {
+            inner,
+            pos: 0,
+            virtual_disk_size,
+        })
+    }
+
+    /// Open a VHD image from any seekable byte source (a `Cursor` over inflated
+    /// bytes, a positioned sub-range of a `.zip`, …) rather than a file path —
+    /// so an image stored inside an archive can be read without extracting it to
+    /// a temp file first.
+    pub fn open_reader(backing: Box<dyn ReadSeekSend>) -> Result<Self, VhdError> {
+        // RED stub — GREEN replaces this with the shared footer/BAT parse.
+        let _ = backing;
+        Err(VhdError::FileTooSmall)
     }
 
     /// Virtual disk size in bytes as recorded in the VHD footer.
@@ -99,12 +128,17 @@ impl Read for VhdReader {
                 self.pos += n as u64;
                 Ok(n)
             }
-            VhdInner::Dynamic { file, bat, block_size } => {
+            VhdInner::Dynamic {
+                file,
+                bat,
+                block_size,
+            } => {
                 let block_size_u64 = u64::from(*block_size);
                 let block_end = ((self.pos / block_size_u64) + 1) * block_size_u64;
                 let chunk = to_read.min((block_end - self.pos) as usize);
 
-                match bat.file_offset_for_byte(self.pos)
+                match bat
+                    .file_offset_for_byte(self.pos)
                     .map_err(|e| std::io::Error::other(e.to_string()))?
                 {
                     Some(file_off) => {
@@ -159,6 +193,32 @@ mod tests {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         f.write_all(data).unwrap();
         f
+    }
+
+    #[test]
+    fn open_reader_over_cursor_matches_open_path() {
+        use std::io::Cursor;
+        let sector: Vec<u8> = (0u8..=255).cycle().take(1024).collect();
+        let image = fixed_vhd_bytes(&sector);
+
+        // Oracle: open(path) and read the whole virtual disk.
+        let tmp = write_tmp(&image);
+        let mut via_path = VhdReader::open(tmp.path()).expect("open path");
+        let mut want = Vec::new();
+        via_path.read_to_end(&mut want).expect("read path");
+
+        // Under test: open_reader over an in-RAM Cursor of the SAME bytes — the
+        // zip-direct backing path.
+        let mut via_reader =
+            VhdReader::open_reader(Box::new(Cursor::new(image.clone()))).expect("open_reader");
+        let mut got = Vec::new();
+        via_reader.read_to_end(&mut got).expect("read reader");
+
+        assert_eq!(
+            got, want,
+            "open_reader must read byte-identically to open(path)"
+        );
+        assert_eq!(via_reader.virtual_disk_size(), via_path.virtual_disk_size());
     }
 
     #[test]
@@ -269,7 +329,9 @@ mod tests {
             f[60..64].copy_from_slice(&3u32.to_be_bytes()); // Dynamic
             let mut s: u32 = 0;
             for (i, &b) in f.iter().enumerate() {
-                if !(64..68).contains(&i) { s = s.wrapping_add(u32::from(b)); }
+                if !(64..68).contains(&i) {
+                    s = s.wrapping_add(u32::from(b));
+                }
             }
             f[64..68].copy_from_slice(&(!s).to_be_bytes());
             f
@@ -325,22 +387,24 @@ mod tests {
             f[32..40].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // original_size
             f[40..48].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // current_size
             f[60..64].copy_from_slice(&3u32.to_be_bytes()); // disk_type = Dynamic
-            // One's-complement checksum (bytes 64-67 zeroed during computation).
+                                                            // One's-complement checksum (bytes 64-67 zeroed during computation).
             let mut s: u32 = 0;
             for (i, &b) in f.iter().enumerate() {
-                if !(64..68).contains(&i) { s = s.wrapping_add(u32::from(b)); }
+                if !(64..68).contains(&i) {
+                    s = s.wrapping_add(u32::from(b));
+                }
             }
             f[64..68].copy_from_slice(&(!s).to_be_bytes());
             f
         };
 
-        file[0..512].copy_from_slice(&footer);      // footer copy
-        file[3584..4096].copy_from_slice(&footer);  // real footer at end
+        file[0..512].copy_from_slice(&footer); // footer copy
+        file[3584..4096].copy_from_slice(&footer); // real footer at end
 
         // Dynamic header (bat_offset=1536, block_size=4MiB, max_bat_entries=1).
         file[512..520].copy_from_slice(b"cxsparse");
         file[512 + 16..512 + 24].copy_from_slice(&1536u64.to_be_bytes()); // bat_offset
-        file[512 + 28..512 + 32].copy_from_slice(&1u32.to_be_bytes());    // max_bat_entries
+        file[512 + 28..512 + 32].copy_from_slice(&1u32.to_be_bytes()); // max_bat_entries
         file[512 + 32..512 + 36].copy_from_slice(&(BLOCK_SIZE as u32).to_be_bytes()); // block_size
 
         // BAT: entry 0 = sector 4 (byte 2048 = start of block 0).
@@ -361,7 +425,9 @@ mod tests {
         let mut reader = VhdReader::open(tmp.path()).expect("open synthetic 4MiB-block vhd");
         let mut buf = [0u8; 512];
         reader.seek(SeekFrom::Start(0)).unwrap();
-        reader.read_exact(&mut buf).expect("read block 0 data sector 0");
+        reader
+            .read_exact(&mut buf)
+            .expect("read block 0 data sector 0");
         assert_eq!(
             buf, [0xABu8; 512],
             "with 4 MiB block_size, bitmap is 2 sectors (1024 bytes); \
@@ -393,26 +459,41 @@ mod tests {
         // raw → VHD (dynamic, qemu default VPC format).
         let vhd_path = tmp.path().join("test.vhd");
         let ok = std::process::Command::new(QEMU_IMG)
-            .args(["convert", "-O", "vpc",
-                   raw_path.to_str().unwrap(),
-                   vhd_path.to_str().unwrap()])
-            .status().expect("spawn qemu-img").success();
+            .args([
+                "convert",
+                "-O",
+                "vpc",
+                raw_path.to_str().unwrap(),
+                vhd_path.to_str().unwrap(),
+            ])
+            .status()
+            .expect("spawn qemu-img")
+            .success();
         assert!(ok, "qemu-img raw→vpc failed");
 
         // VHD → reference raw (qemu-img resolves CHS rounding authoritatively).
         let ref_path = tmp.path().join("reference.raw");
         let ok = std::process::Command::new(QEMU_IMG)
-            .args(["convert", "-O", "raw",
-                   vhd_path.to_str().unwrap(),
-                   ref_path.to_str().unwrap()])
-            .status().expect("spawn qemu-img").success();
+            .args([
+                "convert",
+                "-O",
+                "raw",
+                vhd_path.to_str().unwrap(),
+                ref_path.to_str().unwrap(),
+            ])
+            .status()
+            .expect("spawn qemu-img")
+            .success();
         assert!(ok, "qemu-img vpc→raw failed");
         let ref_data = std::fs::read(&ref_path).expect("read reference raw");
 
         let mut reader = VhdReader::open(&vhd_path).expect("open vhd");
         let vhd_size = reader.virtual_disk_size() as usize;
-        assert_eq!(vhd_size, ref_data.len(),
-            "virtual_disk_size must match qemu-img reference raw size");
+        assert_eq!(
+            vhd_size,
+            ref_data.len(),
+            "virtual_disk_size must match qemu-img reference raw size"
+        );
 
         // Sample every 64 KiB (covers block boundaries) plus near-end.
         let step = 65536usize;
@@ -423,7 +504,8 @@ mod tests {
             reader.seek(SeekFrom::Start(offset as u64)).expect("seek");
             reader.read_exact(&mut buf).expect("read");
             assert_eq!(
-                buf, ref_data[offset..offset + len],
+                buf,
+                ref_data[offset..offset + len],
                 "byte mismatch at offset {offset:#x}",
             );
             offset += step;
@@ -431,7 +513,9 @@ mod tests {
         if vhd_size >= 512 {
             let end = vhd_size - 512;
             let mut buf = vec![0u8; 512];
-            reader.seek(SeekFrom::Start(end as u64)).expect("seek near-end");
+            reader
+                .seek(SeekFrom::Start(end as u64))
+                .expect("seek near-end");
             reader.read_exact(&mut buf).expect("read near-end");
             assert_eq!(buf, ref_data[end..end + 512], "byte mismatch near end");
         }
@@ -447,10 +531,16 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let ref_path = tmp.path().join("reference.raw");
         let ok = std::process::Command::new(QEMU_IMG)
-            .args(["convert", "-O", "raw",
-                   corpus.to_str().unwrap(),
-                   ref_path.to_str().unwrap()])
-            .status().expect("spawn qemu-img").success();
+            .args([
+                "convert",
+                "-O",
+                "raw",
+                corpus.to_str().unwrap(),
+                ref_path.to_str().unwrap(),
+            ])
+            .status()
+            .expect("spawn qemu-img")
+            .success();
         assert!(ok, "qemu-img convert failed for {}", corpus.display());
         let ref_data = std::fs::read(&ref_path).expect("read raw");
 
@@ -463,7 +553,9 @@ mod tests {
         assert!(
             ref_data.len() == vhd_size || ref_data.len() == vhd_size + 512,
             "unexpected ref raw size {} vs vhd_size {} for {}",
-            ref_data.len(), vhd_size, corpus.display(),
+            ref_data.len(),
+            vhd_size,
+            corpus.display(),
         );
         let cmp_size = vhd_size; // never compare footer bytes
 
@@ -474,8 +566,12 @@ mod tests {
             let mut buf = vec![0u8; len];
             reader.seek(SeekFrom::Start(offset as u64)).expect("seek");
             reader.read_exact(&mut buf).expect("read");
-            assert_eq!(buf, ref_data[offset..offset + len],
-                "byte mismatch at {offset:#x} in {}", corpus.display());
+            assert_eq!(
+                buf,
+                ref_data[offset..offset + len],
+                "byte mismatch at {offset:#x} in {}",
+                corpus.display()
+            );
             offset += step;
         }
     }
