@@ -43,10 +43,10 @@ pub struct VhdReader {
 
 enum VhdInner {
     Fixed {
-        file: std::fs::File,
+        file: Box<dyn ReadSeekSend>,
     },
     Dynamic {
-        file: std::fs::File,
+        file: Box<dyn ReadSeekSend>,
         bat: dynamic::BlockAllocationTable,
         block_size: u32,
     },
@@ -58,26 +58,33 @@ impl VhdReader {
     /// Returns [`VhdError`] if the file is not a valid VHD, or if it is a
     /// Differencing disk (parent resolution is not supported).
     pub fn open(path: &Path) -> Result<Self, VhdError> {
-        let data = std::fs::read(path)?;
+        Self::open_reader(Box::new(std::fs::File::open(path)?))
+    }
+
+    /// Open a VHD image from any seekable byte source (a `Cursor` over inflated
+    /// bytes, a positioned sub-range of a `.zip`, …) rather than a file path —
+    /// so an image stored inside an archive can be read without extracting it to
+    /// a temp file first.
+    pub fn open_reader(mut backing: Box<dyn ReadSeekSend>) -> Result<Self, VhdError> {
+        // The footer (last 512 B) + dynamic header + BAT parsers take a whole-file
+        // slice, so materialize the backing once (the file-path `open` did the
+        // same via `std::fs::read`). The backing is then kept for block reads.
+        let mut data = Vec::new();
+        backing.read_to_end(&mut data)?;
         let footer = footer::VhdFooter::parse(&data)?;
 
         let (inner, virtual_disk_size) = match footer.disk_type {
-            footer::DiskType::Fixed => {
-                let file = std::fs::File::open(path)?;
-                (VhdInner::Fixed { file }, footer.current_size)
-            }
+            footer::DiskType::Fixed => (VhdInner::Fixed { file: backing }, footer.current_size),
             footer::DiskType::Dynamic => {
                 let dyn_hdr = dynamic::DynamicHeader::parse(&data, footer.data_offset)?;
                 let bat = dynamic::BlockAllocationTable::parse(&data, &dyn_hdr)?;
-                let file = std::fs::File::open(path)?;
-                let size = footer.current_size;
                 (
                     VhdInner::Dynamic {
-                        file,
+                        file: backing,
                         bat,
                         block_size: dyn_hdr.block_size,
                     },
-                    size,
+                    footer.current_size,
                 )
             }
         };
@@ -87,16 +94,6 @@ impl VhdReader {
             pos: 0,
             virtual_disk_size,
         })
-    }
-
-    /// Open a VHD image from any seekable byte source (a `Cursor` over inflated
-    /// bytes, a positioned sub-range of a `.zip`, …) rather than a file path —
-    /// so an image stored inside an archive can be read without extracting it to
-    /// a temp file first.
-    pub fn open_reader(backing: Box<dyn ReadSeekSend>) -> Result<Self, VhdError> {
-        // RED stub — GREEN replaces this with the shared footer/BAT parse.
-        let _ = backing;
-        Err(VhdError::FileTooSmall)
     }
 
     /// Virtual disk size in bytes as recorded in the VHD footer.
