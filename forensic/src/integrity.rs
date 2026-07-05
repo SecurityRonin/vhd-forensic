@@ -95,7 +95,7 @@ impl VhdIntegrityAnomaly {
                 "footer cookie is {:?} (hex {}), not 'conectix' — the trailing 512 bytes \
                  are not a valid VHD footer",
                 String::from_utf8_lossy(found),
-                hex8(found)
+                hex8(*found)
             ),
             Self::FooterChecksumMismatch { stored, computed } => format!(
                 "footer checksum 0x{stored:08x} does not match the recomputed 0x{computed:08x} \
@@ -140,9 +140,65 @@ impl forensicnomicon::report::Observation for VhdIntegrityAnomaly {
 /// anomalies. Panic-free and read-only; returns every anomaly found.
 #[must_use]
 pub fn audit(data: &[u8]) -> Vec<VhdIntegrityAnomaly> {
-    // RED stub — replaced by the GREEN implementation.
-    let _ = data;
-    Vec::new()
+    let mut out = Vec::new();
+    let Some(footer) = data.get(data.len().saturating_sub(FOOTER_SIZE)..) else {
+        out.push(VhdIntegrityAnomaly::FooterTruncated { len: data.len() });
+        return out;
+    };
+    if footer.len() < FOOTER_SIZE {
+        out.push(VhdIntegrityAnomaly::FooterTruncated { len: data.len() });
+        return out;
+    }
+
+    // Cookie @0.
+    if footer.get(OFF_COOKIE..OFF_COOKIE + 8) != Some(COOKIE.as_slice()) {
+        let mut found = [0u8; 8];
+        if let Some(s) = footer.get(OFF_COOKIE..OFF_COOKIE + 8) {
+            found.copy_from_slice(s);
+        }
+        out.push(VhdIntegrityAnomaly::FooterCookieInvalid { found });
+    }
+
+    // Checksum @64 — one's-complement over the footer with the field zeroed.
+    let stored = be_u32(footer, OFF_CHECKSUM);
+    let computed = footer_checksum(footer);
+    if stored != computed {
+        out.push(VhdIntegrityAnomaly::FooterChecksumMismatch { stored, computed });
+    }
+
+    // File format version @12.
+    let version = be_u32(footer, OFF_VERSION);
+    if version != CURRENT_VERSION {
+        out.push(VhdIntegrityAnomaly::FileFormatVersionUnexpected { found: version });
+    }
+
+    // Disk type @60 — 0 None (tolerated), 2 Fixed, 3 Dynamic, 4 Differencing.
+    let disk_type = be_u32(footer, OFF_DISK_TYPE);
+    if !matches!(disk_type, 0 | 2 | 3 | 4) {
+        out.push(VhdIntegrityAnomaly::DiskTypeUnknown { found: disk_type });
+    }
+
+    // DataOffset @16 vs disk type: Fixed must be the all-ones sentinel;
+    // Dynamic/Differencing must point into the file (not the sentinel).
+    let data_offset = be_u64(footer, OFF_DATA_OFFSET);
+    let inconsistent = match disk_type {
+        2 => data_offset != FIXED_DATA_OFFSET,
+        3 | 4 => data_offset == FIXED_DATA_OFFSET,
+        _ => false,
+    };
+    if inconsistent {
+        out.push(VhdIntegrityAnomaly::DataOffsetInconsistent {
+            disk_type,
+            data_offset,
+        });
+    }
+
+    // SavedState @84.
+    if footer.get(OFF_SAVED_STATE).copied().unwrap_or(0) != 0 {
+        out.push(VhdIntegrityAnomaly::SavedStateSet);
+    }
+
+    out
 }
 
 // ── panic-free byte readers ───────────────────────────────────────────────────
@@ -163,8 +219,12 @@ fn be_u64(buf: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(b)
 }
 
-fn hex8(b: &[u8; 8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+fn hex8(b: [u8; 8]) -> String {
+    use std::fmt::Write as _;
+    b.iter().fold(String::new(), |mut s, x| {
+        let _ = write!(s, "{x:02x}");
+        s
+    })
 }
 
 /// One's-complement checksum over the footer with the checksum field zeroed
@@ -200,13 +260,12 @@ mod tests {
         f
     }
 
-    /// A valid fixed-disk footer: version 1.0, type Fixed, DataOffset all-ones.
+    /// A valid fixed-disk footer: version 1.0, type Fixed, `DataOffset` all-ones.
     fn valid_fixed() -> Vec<u8> {
         footer(CURRENT_VERSION, 2, FIXED_DATA_OFFSET, 0)
     }
 
     fn has(anoms: &[VhdIntegrityAnomaly], code: &str) -> bool {
-        use forensicnomicon::report::Observation;
         anoms.iter().any(|a| a.code() == code)
     }
 
