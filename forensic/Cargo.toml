@@ -1,0 +1,18 @@
+[package]
+name         = "vhd-forensic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description  = "Forensic integrity analyzer for legacy VHD (Virtual PC) disk images — footer/header tamper and structural anomaly findings, built on vhd-core."
+homepage     = "https://github.com/SecurityRonin/vhd-forensic"
+authors      = ["Albert Hui"]
+keywords     = ["forensics", "vhd", "disk-image", "tamper", "dfir"]
+categories   = ["parser-implementations", "filesystem"]
+
+[dependencies]
+forensicnomicon = "1"
+
+[lints]
+workspace = true
