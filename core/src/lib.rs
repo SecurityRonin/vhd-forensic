@@ -134,22 +134,19 @@ impl Read for VhdReader {
                 let block_end = ((self.pos / block_size_u64) + 1) * block_size_u64;
                 let chunk = to_read.min((block_end - self.pos) as usize);
 
-                match bat
+                if let Some(file_off) = bat
                     .file_offset_for_byte(self.pos)
                     .map_err(|e| std::io::Error::other(e.to_string()))?
                 {
-                    Some(file_off) => {
-                        file.seek(SeekFrom::Start(file_off))?;
-                        let n = file.read(&mut buf[..chunk])?;
-                        self.pos += n as u64;
-                        Ok(n)
-                    }
-                    None => {
-                        // Sparse block — return zeroes.
-                        buf[..chunk].fill(0);
-                        self.pos += chunk as u64;
-                        Ok(chunk)
-                    }
+                    file.seek(SeekFrom::Start(file_off))?;
+                    let n = file.read(&mut buf[..chunk])?;
+                    self.pos += n as u64;
+                    Ok(n)
+                } else {
+                    // Sparse block — return zeroes.
+                    buf[..chunk].fill(0);
+                    self.pos += chunk as u64;
+                    Ok(chunk)
                 }
             }
         }

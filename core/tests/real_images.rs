@@ -30,8 +30,7 @@ fn minimal_vhd_sector0_is_zeros() {
     reader.seek(SeekFrom::Start(0)).expect("seek");
     reader.read_exact(&mut buf).expect("read sector 0");
     assert_eq!(
-        buf,
-        [0u8; 512],
+        buf, [0u8; 512],
         "empty dynamic VHD — sector 0 must be all zeros"
     );
 }
@@ -58,8 +57,7 @@ fn fixed_vhd_sector0_is_zeros() {
     reader.seek(SeekFrom::Start(0)).expect("seek");
     reader.read_exact(&mut buf).expect("read sector 0");
     assert_eq!(
-        buf,
-        [0u8; 512],
+        buf, [0u8; 512],
         "fixed VHD with no filesystem — sector 0 must be all zeros"
     );
 }

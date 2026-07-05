@@ -34,13 +34,17 @@ impl DynamicHeader {
         if &hdr[0..8] != DYNAMIC_HEADER_COOKIE {
             return Err(VhdError::BadCookie);
         }
-        let bat_offset     = u64::from_be_bytes(hdr[16..24].try_into().unwrap());
-        let block_size     = u32::from_be_bytes(hdr[32..36].try_into().unwrap());
+        let bat_offset = u64::from_be_bytes(hdr[16..24].try_into().unwrap());
+        let block_size = u32::from_be_bytes(hdr[32..36].try_into().unwrap());
         let max_bat_entries = u32::from_be_bytes(hdr[28..32].try_into().unwrap());
         if block_size == 0 {
             return Err(VhdError::InvalidBlockSize);
         }
-        Ok(DynamicHeader { bat_offset, block_size, max_bat_entries })
+        Ok(DynamicHeader {
+            bat_offset,
+            block_size,
+            max_bat_entries,
+        })
     }
 }
 
@@ -62,7 +66,10 @@ impl BlockAllocationTable {
         let entries = (0..entry_count)
             .map(|i| u32::from_be_bytes(data[start + i * 4..start + i * 4 + 4].try_into().unwrap()))
             .collect();
-        Ok(BlockAllocationTable { entries, block_size: hdr.block_size })
+        Ok(BlockAllocationTable {
+            entries,
+            block_size: hdr.block_size,
+        })
     }
 
     /// Resolve a virtual byte offset to a file byte offset.

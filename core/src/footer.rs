@@ -13,8 +13,8 @@ pub const CURRENT_VERSION: u32 = 0x0001_0000;
 /// VHD disk type codes (§2.1, DiskType field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiskType {
-    Fixed    = 2,
-    Dynamic  = 3,
+    Fixed = 2,
+    Dynamic = 3,
     // Differencing = 4 — rejected at open time
 }
 
@@ -22,8 +22,8 @@ pub enum DiskType {
 #[derive(Debug, Clone)]
 pub struct VhdFooter {
     pub disk_type: DiskType,
-    pub current_size: u64,      // virtual disk size in bytes
-    pub data_offset: u64,       // offset to dynamic header (0xFFFF... for fixed)
+    pub current_size: u64, // virtual disk size in bytes
+    pub data_offset: u64,  // offset to dynamic header (0xFFFF... for fixed)
 }
 
 impl VhdFooter {
@@ -70,7 +70,11 @@ impl VhdFooter {
             });
         }
 
-        Ok(VhdFooter { disk_type, current_size, data_offset })
+        Ok(VhdFooter {
+            disk_type,
+            current_size,
+            data_offset,
+        })
     }
 }
 
