@@ -17,5 +17,5 @@ doc  = false
 
 [dependencies]
 libfuzzer-sys = "0.4"
-vhd           = { path = "../vhd", default-features = false }
+vhd           = { path = "../core", package = "vhd-core", default-features = false }
 tempfile      = "3"
