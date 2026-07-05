@@ -1,0 +1,1 @@
+../../../../vhd/tests/data/minimal.vhd
