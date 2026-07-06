@@ -48,8 +48,9 @@ impl VhdFooter {
         // DataOffset: bytes 16–23
         let data_offset = u64::from_be_bytes(footer[16..24].try_into().unwrap());
 
-        // OriginalSize / CurrentSize: bytes 32–47
-        let current_size = u64::from_be_bytes(footer[40..48].try_into().unwrap());
+        // CurrentSize (virtual disk size): bytes 48–55 (MS-VHD §2.1).
+        // OriginalSize is bytes 40–47; the two differ on a resized disk.
+        let current_size = u64::from_be_bytes(footer[48..56].try_into().unwrap());
 
         // DiskType: bytes 60–63
         let disk_type_raw = u32::from_be_bytes(footer[60..64].try_into().unwrap());
@@ -109,10 +110,10 @@ pub fn test_fixed_footer(virtual_size: u64) -> Vec<u8> {
     footer[12..16].copy_from_slice(&CURRENT_VERSION.to_be_bytes());
     // DataOffset: 0xFFFF_FFFF_FFFF_FFFF for Fixed
     footer[16..24].copy_from_slice(&0xFFFF_FFFF_FFFF_FFFFu64.to_be_bytes());
-    // OriginalSize
-    footer[32..40].copy_from_slice(&virtual_size.to_be_bytes());
-    // CurrentSize
+    // OriginalSize (offset 40)
     footer[40..48].copy_from_slice(&virtual_size.to_be_bytes());
+    // CurrentSize (offset 48)
+    footer[48..56].copy_from_slice(&virtual_size.to_be_bytes());
     // DiskType: Fixed = 2
     footer[60..64].copy_from_slice(&2u32.to_be_bytes());
     // Checksum (computed with checksum field zeroed)

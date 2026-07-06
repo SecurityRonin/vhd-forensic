@@ -318,8 +318,8 @@ mod tests {
             f[8..12].copy_from_slice(&0x0000_0002u32.to_be_bytes());
             f[12..16].copy_from_slice(&0x0001_0000u32.to_be_bytes());
             f[16..24].copy_from_slice(&512u64.to_be_bytes());
-            f[32..40].copy_from_slice(&(512u64).to_be_bytes()); // original_size
-            f[40..48].copy_from_slice(&(512u64).to_be_bytes()); // current_size
+            f[40..48].copy_from_slice(&(512u64).to_be_bytes()); // original_size (offset 40)
+            f[48..56].copy_from_slice(&(512u64).to_be_bytes()); // current_size (offset 48)
             f[60..64].copy_from_slice(&3u32.to_be_bytes()); // Dynamic
             let mut s: u32 = 0;
             for (i, &b) in f.iter().enumerate() {
@@ -378,8 +378,8 @@ mod tests {
             f[8..12].copy_from_slice(&0x0000_0002u32.to_be_bytes()); // features
             f[12..16].copy_from_slice(&0x0001_0000u32.to_be_bytes()); // file format version
             f[16..24].copy_from_slice(&512u64.to_be_bytes()); // data_offset → dynamic header
-            f[32..40].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // original_size
-            f[40..48].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // current_size
+            f[40..48].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // original_size (offset 40)
+            f[48..56].copy_from_slice(&BLOCK_SIZE.to_be_bytes()); // current_size (offset 48)
             f[60..64].copy_from_slice(&3u32.to_be_bytes()); // disk_type = Dynamic
                                                             // One's-complement checksum (bytes 64-67 zeroed during computation).
             let mut s: u32 = 0;
