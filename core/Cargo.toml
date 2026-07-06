@@ -1,5 +1,7 @@
 [package]
 name         = "vhd-core"
+# Test fixtures (real dfvfs VHDs, corpus, fuzz) are for the repo, not consumers.
+exclude      = ["tests/data/", "corpus/", "fuzz/"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

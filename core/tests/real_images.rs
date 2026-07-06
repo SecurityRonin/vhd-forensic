@@ -107,3 +107,22 @@ fn current_size_read_from_offset_48_not_40() {
          not offset 40 (OriginalSize)"
     );
 }
+
+// ── ntfs_dynamic.vhd (dfvfs; third-party real Windows dynamic VHD) — TIER 1 ───
+//
+// A real Windows-authored (creator "win ", Win10/Hyper-V) dynamic NTFS VHD from
+// log2timeline/dfvfs (Apache-2.0). Virtual size 4,194,304 B as reported by
+// `qemu-img info -f vpc` — an INDEPENDENT reference oracle we did not author.
+// Third-party real-world artifact + independent oracle = Tier-1. Dynamic VHDs read
+// current_size cleanly (no fixed-VHD footer-as-sector ambiguity). tests/data/README.md.
+#[test]
+fn dfvfs_dynamic_vhd_matches_reference_oracle() {
+    let path = format!("{DATA_DIR}/ntfs_dynamic.vhd");
+    let reader = vhd::VhdReader::open(Path::new(&path)).expect("open dfvfs dynamic vhd");
+    assert_eq!(
+        reader.virtual_disk_size(),
+        4_194_304,
+        "must match qemu-img -f vpc (independent oracle) on the third-party dfvfs artifact"
+    );
+    assert_eq!(reader.disk_type(), vhd::DiskType::Dynamic);
+}
