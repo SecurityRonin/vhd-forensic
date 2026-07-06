@@ -39,8 +39,10 @@ for anomaly in audit(&image_bytes) {
 use std::io::Read;
 use vhd::VhdReader;
 
-let mut reader = VhdReader::open(std::path::Path::new("disk.vhd"))?;
-println!("virtual size: {} bytes", reader.virtual_disk_size());
+let reader = VhdReader::open(std::path::Path::new("disk.vhd"))?;
+println!("current size:  {} bytes", reader.virtual_disk_size()); // CurrentSize @48 (readable)
+println!("original size: {} bytes", reader.original_size());     // OriginalSize @40 (creation)
+// original_size() != virtual_disk_size()  ⇒  the disk was resized after creation
 ```
 
 `VhdReader::open_reader` accepts any `Read + Seek + Send + Sync`, so a VHD stored
@@ -61,6 +63,7 @@ yields a graded finding.
 | `VHD-DISK-TYPE-UNKNOWN` | Medium | disk type not Fixed / Dynamic / Differencing |
 | `VHD-DATA-OFFSET-INCONSISTENT` | Medium | `DataOffset` inconsistent with the disk type |
 | `VHD-SAVED-STATE` | Low | image captured in a saved (suspended) state |
+| `VHD-SIZE-RESIZED` | Low | `OriginalSize`@40 != `CurrentSize`@48 — disk resized after creation (History) |
 
 ## Trust but verify
 
