@@ -1,0 +1,9 @@
+# gitleaks — extend the default ruleset. CI cache keys (e.g. corpus-vhd-v1) trip
+# the generic-api-key entropy rule but are not secrets; allowlist that pattern so
+# real secrets still surface.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CI corpus cache keys are not secrets"
+regexes = ['''corpus-vhd-[a-z0-9]+''']

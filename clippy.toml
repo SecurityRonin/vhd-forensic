@@ -1,0 +1,6 @@
+# Allow unwrap()/expect() inside tests; production keeps them denied (workspace lints).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Format/product names that look like code identifiers to doc_markdown.
+doc-valid-idents = ["MS-VHD", "qemu-img", "libvhdi", "azure-vhd-utils", "conectix", "cxsparse", "CHS", "OriginalSize", "CurrentSize", "DataOffset", "SavedState", "DiskType", "VHD", ".."]
