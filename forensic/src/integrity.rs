@@ -21,6 +21,8 @@ const OFF_VERSION: usize = 12;
 const OFF_DATA_OFFSET: usize = 16;
 const OFF_DISK_TYPE: usize = 60;
 const OFF_CHECKSUM: usize = 64;
+const OFF_ORIGINAL_SIZE: usize = 40;
+const OFF_CURRENT_SIZE: usize = 48;
 const OFF_SAVED_STATE: usize = 84;
 
 /// A footer-level integrity or structure anomaly. Each variant carries the
@@ -44,6 +46,9 @@ pub enum VhdIntegrityAnomaly {
     /// `DataOffset` is inconsistent with the disk type (Fixed must be
     /// `0xFFFF_FFFF_FFFF_FFFF`; Dynamic/Differencing must point into the file).
     DataOffsetInconsistent { disk_type: u32, data_offset: u64 },
+    /// Footer OriginalSize (offset 40) differs from CurrentSize (offset 48) — the
+    /// disk was resized after creation (a History signal, not tampering).
+    SizeResized { original_size: u64, current_size: u64 },
 }
 
 impl VhdIntegrityAnomaly {
@@ -55,7 +60,7 @@ impl VhdIntegrityAnomaly {
             Self::FileFormatVersionUnexpected { .. }
             | Self::DiskTypeUnknown { .. }
             | Self::DataOffsetInconsistent { .. } => Severity::Medium,
-            Self::SavedStateSet => Severity::Low,
+            Self::SavedStateSet | Self::SizeResized { .. } => Severity::Low,
         }
     }
 
@@ -70,6 +75,8 @@ impl VhdIntegrityAnomaly {
             | Self::DiskTypeUnknown { .. }
             | Self::SavedStateSet
             | Self::DataOffsetInconsistent { .. } => Category::Structure,
+            // The medium's biography: a resize is a History signal.
+            Self::SizeResized { .. } => Category::History,
         }
     }
 
@@ -82,6 +89,7 @@ impl VhdIntegrityAnomaly {
             Self::DiskTypeUnknown { .. } => "VHD-DISK-TYPE-UNKNOWN",
             Self::SavedStateSet => "VHD-SAVED-STATE",
             Self::DataOffsetInconsistent { .. } => "VHD-DATA-OFFSET-INCONSISTENT",
+            Self::SizeResized { .. } => "VHD-SIZE-RESIZED",
         }
     }
 
@@ -116,6 +124,14 @@ impl VhdIntegrityAnomaly {
             } => format!(
                 "DataOffset 0x{data_offset:016x} is inconsistent with disk type {disk_type} \
                  (Fixed must be 0xFFFFFFFFFFFFFFFF; Dynamic/Differencing must point into the file)"
+            ),
+            Self::SizeResized {
+                original_size,
+                current_size,
+            } => format!(
+                "footer OriginalSize {original_size} != CurrentSize {current_size} — the disk was \
+                 resized after creation (current is the readable capacity; original is the \
+                 creation size that libvhdi reports as media size)"
             ),
         }
     }
@@ -349,6 +365,27 @@ mod tests {
     fn fixed_disk_with_non_sentinel_data_offset_is_inconsistent() {
         let f = footer(CURRENT_VERSION, 2, 0x1000, 0);
         assert!(has(&audit(&f), "VHD-DATA-OFFSET-INCONSISTENT"));
+    }
+
+    fn valid_with_sizes(original: u64, current: u64) -> Vec<u8> {
+        // A dynamic footer with valid cookie/version/type, given sizes, correct checksum.
+        let mut f = footer(CURRENT_VERSION, 3, 0x200, 0);
+        f[OFF_ORIGINAL_SIZE..OFF_ORIGINAL_SIZE + 8].copy_from_slice(&original.to_be_bytes());
+        f[OFF_CURRENT_SIZE..OFF_CURRENT_SIZE + 8].copy_from_slice(&current.to_be_bytes());
+        f[OFF_CHECKSUM..OFF_CHECKSUM + 4].copy_from_slice(&[0u8; 4]);
+        let cs = footer_checksum(&f);
+        f[OFF_CHECKSUM..OFF_CHECKSUM + 4].copy_from_slice(&cs.to_be_bytes());
+        f
+    }
+
+    #[test]
+    fn size_resized_is_detected() {
+        assert!(has(&audit(&valid_with_sizes(1_048_576, 2_097_152)), "VHD-SIZE-RESIZED"));
+    }
+
+    #[test]
+    fn equal_sizes_not_flagged_as_resized() {
+        assert!(!has(&audit(&valid_with_sizes(2_097_152, 2_097_152)), "VHD-SIZE-RESIZED"));
     }
 
     #[test]
