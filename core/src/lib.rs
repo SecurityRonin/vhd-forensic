@@ -42,6 +42,7 @@ pub struct VhdReader {
     inner: VhdInner,
     pos: u64,
     virtual_disk_size: u64,
+    original_size: u64,
 }
 
 enum VhdInner {
@@ -96,12 +97,21 @@ impl VhdReader {
             inner,
             pos: 0,
             virtual_disk_size,
+            original_size: footer.original_size,
         })
     }
 
-    /// Virtual disk size in bytes as recorded in the VHD footer.
+    /// Virtual disk size in bytes — the current, readable capacity
+    /// (footer CurrentSize, offset 48). This is what qemu-img reports.
     pub fn virtual_disk_size(&self) -> u64 {
         self.virtual_disk_size
+    }
+
+    /// Original (creation-time) size in bytes (footer OriginalSize, offset 40).
+    /// Equals `virtual_disk_size` for an un-resized disk and differs after a
+    /// resize (a forensic signal). This is the value libvhdi reports as media size.
+    pub fn original_size(&self) -> u64 {
+        self.original_size
     }
 
     /// Disk type (Fixed or Dynamic).

@@ -23,7 +23,8 @@ pub enum DiskType {
 #[derive(Debug, Clone)]
 pub struct VhdFooter {
     pub disk_type: DiskType,
-    pub current_size: u64, // virtual disk size in bytes
+    pub current_size: u64, // CurrentSize (offset 48) — current/readable virtual size
+    pub original_size: u64, // OriginalSize (offset 40) — size at creation
     pub data_offset: u64,  // offset to dynamic header (0xFFFF... for fixed)
 }
 
@@ -52,6 +53,8 @@ impl VhdFooter {
         // CurrentSize (virtual disk size): bytes 48–55 (MS-VHD §2.1).
         // OriginalSize is bytes 40–47; the two differ on a resized disk.
         let current_size = be_u64(footer, 48);
+        // OriginalSize (offset 40) — creation size; libvhdi reports this as media size.
+        let original_size = be_u64(footer, 40);
 
         // DiskType: bytes 60–63
         let disk_type_raw = be_u32(footer, 60);
@@ -75,6 +78,7 @@ impl VhdFooter {
         Ok(VhdFooter {
             disk_type,
             current_size,
+            original_size,
             data_offset,
         })
     }
