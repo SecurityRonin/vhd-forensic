@@ -25,8 +25,10 @@ pub struct DynamicHeader {
 
 impl DynamicHeader {
     pub fn parse(data: &[u8], offset: u64) -> Result<Self> {
-        let start = offset as usize;
-        let end = start + DYNAMIC_HEADER_SIZE;
+        let start = usize::try_from(offset).map_err(|_| VhdError::BatOutOfBounds)?;
+        let end = start
+            .checked_add(DYNAMIC_HEADER_SIZE)
+            .ok_or(VhdError::BatOutOfBounds)?;
         if end > data.len() {
             return Err(VhdError::BatOutOfBounds);
         }
@@ -57,9 +59,12 @@ pub struct BlockAllocationTable {
 
 impl BlockAllocationTable {
     pub fn parse(data: &[u8], hdr: &DynamicHeader) -> Result<Self> {
-        let start = hdr.bat_offset as usize;
+        let start = usize::try_from(hdr.bat_offset).map_err(|_| VhdError::BatOutOfBounds)?;
         let entry_count = hdr.max_bat_entries as usize;
-        let end = start + entry_count * 4;
+        let table_bytes = entry_count.checked_mul(4).ok_or(VhdError::BatOutOfBounds)?;
+        let end = start
+            .checked_add(table_bytes)
+            .ok_or(VhdError::BatOutOfBounds)?;
         if end > data.len() {
             return Err(VhdError::BatOutOfBounds);
         }
@@ -91,5 +96,43 @@ impl BlockAllocationTable {
         let block_file_offset = u64::from(bat_entry) * 512 + bitmap_sectors(self.block_size) * 512;
         let offset_in_block = virtual_byte % block_size;
         Ok(Some(block_file_offset + offset_in_block))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_header_parse_huge_offset_returns_err_no_panic() {
+        // A malicious footer data_offset must not overflow start + header size.
+        let r = DynamicHeader::parse(&[0u8; 64], u64::MAX);
+        assert!(r.is_err(), "huge offset must be a clean error, not a panic");
+    }
+
+    #[test]
+    fn bat_parse_overflow_returns_err_no_panic() {
+        // bat_offset + max_bat_entries*4 must not overflow past the bounds check
+        // (which would let a 16 GiB allocation through).
+        let hdr = DynamicHeader {
+            bat_offset: u64::MAX,
+            block_size: 512,
+            max_bat_entries: 0xFFFF_FFFF,
+        };
+        let r = BlockAllocationTable::parse(&[0u8; 64], &hdr);
+        assert!(r.is_err(), "overflowing BAT geometry must error, not panic");
+    }
+
+    #[test]
+    fn bat_parse_huge_entry_count_is_not_an_alloc_bomb() {
+        // max_bat_entries claims 4 billion entries but the file is tiny → must
+        // error out before allocating, not OOM.
+        let hdr = DynamicHeader {
+            bat_offset: 0,
+            block_size: 512,
+            max_bat_entries: 0xFFFF_FFFF,
+        };
+        let r = BlockAllocationTable::parse(&[0u8; 64], &hdr);
+        assert!(r.is_err());
     }
 }
