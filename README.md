@@ -1,90 +1,85 @@
-[![Crates.io](https://img.shields.io/crates/v/vhd.svg)](https://crates.io/crates/vhd)
-[![Docs.rs](https://img.shields.io/docsrs/vhd)](https://docs.rs/vhd)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/SecurityRonin/vhd/actions/workflows/ci.yml/badge.svg)](https://github.com/SecurityRonin/vhd/actions/workflows/ci.yml)
+# vhd-forensic
+
+[![Crates.io: vhd-core](https://img.shields.io/crates/v/vhd-core.svg?label=vhd-core)](https://crates.io/crates/vhd-core)
+[![Crates.io: vhd-forensic](https://img.shields.io/crates/v/vhd-forensic.svg?label=vhd-forensic)](https://crates.io/crates/vhd-forensic)
+[![Docs.rs](https://img.shields.io/docsrs/vhd-core)](https://docs.rs/vhd-core)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/SecurityRonin/vhd-forensic/actions/workflows/ci.yml/badge.svg)](https://github.com/SecurityRonin/vhd-forensic/actions/workflows/ci.yml)
+[![unsafe: forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/SecurityRonin/vhd-forensic)
 [![Sponsor](https://img.shields.io/badge/sponsor-h4x0r-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/h4x0r)
 
-**Pure-Rust read-only legacy VHD disk image reader — fixed and dynamic disk types.**
+**Read and audit legacy VHD (Virtual PC / Hyper-V Gen-1) disk images in pure Rust — a hardened `Read + Seek` container reader plus a footer integrity analyzer for DFIR.**
 
-Decodes the MS-VHD container format (Virtual PC, Virtual Server, Hyper-V Generation-1) and exposes a `Read + Seek` interface over the virtual sector stream. Supports both Fixed (raw sector data + footer) and Dynamic (BAT-addressed block data) disk types. Zero unsafe code, no C bindings.
+This workspace ships two crates: **`vhd-core`** — the MS-VHD container reader (Fixed and Dynamic disks), exposing a `Read + Seek` view over the virtual sector stream (published as `vhd-core`, imported as `vhd`); and **`vhd-forensic`** — the integrity analyzer that parses the footer *raw* (which the reader validates-and-discards) and reports tamper / structural anomalies as `forensicnomicon::report::Finding`. Zero unsafe code, no C bindings, no external tools.
 
 ```toml
 [dependencies]
-vhd = "0.1"
+vhd-core = "0.2"       # reader — imported as `vhd`
+vhd-forensic = "0.2"   # analyzer — graded footer findings
 ```
-
----
 
 ## Usage
 
-### Open a VHD and read sectors
+### Audit a VHD footer for tampering
 
 ```rust
-use vhd::VhdReader;
-use std::io::{Read, Seek, SeekFrom};
+use vhd_forensic::audit;
+use forensicnomicon::report::Observation;
 
-let mut reader = VhdReader::open("disk.vhd")?;
-
-println!("Virtual disk size: {} bytes", reader.virtual_disk_size());
-println!("Disk type: {:?}", reader.disk_type());
-
-// Read the first sector
-let mut sector = [0u8; 512];
-reader.read_exact(&mut sector)?;
-
-// Seek anywhere
-reader.seek(SeekFrom::Start(1_048_576))?;
+for anomaly in audit(&image_bytes) {
+    let finding = anomaly.to_finding(source);   // canonical forensicnomicon Finding
+    println!("{} — {}", finding.code, finding.note);
+}
 ```
 
-### Pass to a filesystem crate
-
-`VhdReader` implements `Read + Seek`, so it drops directly into any crate that accepts a reader:
+### Open a VHD and read the virtual sector stream
 
 ```rust
+use std::io::Read;
 use vhd::VhdReader;
 
-let reader = VhdReader::open("disk.vhd")?;
-// e.g. ext4fs_forensic::Filesystem::open(reader)?;
+let mut reader = VhdReader::open(std::path::Path::new("disk.vhd"))?;
+println!("virtual size: {} bytes", reader.virtual_disk_size());
 ```
 
+`VhdReader::open_reader` accepts any `Read + Seek + Send + Sync`, so a VHD stored
+inside an archive can be read without extracting it to a temp file.
+
+## Forensic analysis — `vhd-forensic`
+
+`audit(&[u8])` parses the trailing 512-byte footer at the documented MS-VHD offsets
+and returns typed anomalies; each implements `Observation`, so `.to_finding(source)`
+yields a graded finding.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `VHD-FOOTER-TRUNCATED` | High | file smaller than the 512-byte footer |
+| `VHD-FOOTER-COOKIE-INVALID` | High | cookie != `conectix` |
+| `VHD-FOOTER-CHECKSUM-MISMATCH` | High | one's-complement checksum tamper / corruption |
+| `VHD-FORMAT-VERSION-UNEXPECTED` | Medium | format version != 1.0 |
+| `VHD-DISK-TYPE-UNKNOWN` | Medium | disk type not Fixed / Dynamic / Differencing |
+| `VHD-DATA-OFFSET-INCONSISTENT` | Medium | `DataOffset` inconsistent with the disk type |
+| `VHD-SAVED-STATE` | Low | image captured in a saved (suspended) state |
+
+## Trust but verify
+
+- **Panic-free** — `unsafe_code = forbid`, `clippy::unwrap_used`/`expect_used = deny`,
+  bounded readers, and `checked_add`/`checked_mul` on every offset/length from the image.
+- **Fuzzed** — `fuzz_open` (reader) and `fuzz_audit` (analyzer) over arbitrary bytes;
+  local smoke ran 8.1 M / 52 K executions with no panic.
+- **Validated against real qemu-img images with an independent oracle** — including the
+  `current_size` offset bug caught by spec research and fixed against qemu-img's own
+  reported size. See [Validation](https://securityronin.github.io/vhd-forensic/validation/).
+
+## Supported disk types
+
+| Type | Read | Notes |
+|---|---|---|
+| Fixed | ✅ | raw sector data + trailing footer |
+| Dynamic | ✅ | BAT-addressed sparse blocks |
+| Differencing | — | rejected (parent-locator resolution out of scope) |
+
 ---
 
-## Supported formats
-
-| Format | Supported |
-|--------|:---------:|
-| Fixed disk (raw sectors + footer) | ✓ |
-| Dynamic disk (Block Allocation Table) | ✓ |
-| Differencing disk (parent chain) | not planned |
-
-Read-only. Differencing disks require parent locator resolution which is out of scope for a forensic reader. For Hyper-V Generation-2 and Azure virtual disks use the [`vhdx`](https://github.com/SecurityRonin/vhdx) crate.
-
----
-
-## Related crates
-
-### Container readers
-
-| Crate | Format | Notes |
-|-------|--------|-------|
-| [`ewf`](https://github.com/SecurityRonin/ewf) | E01 / EWF / Ex01 | Dominant professional forensic acquisition format |
-| [`aff4`](https://github.com/SecurityRonin/aff4) | AFF4 v1 | Evimetry / aff4-imager forensic disk images with Map streams |
-| [`vmdk`](https://github.com/SecurityRonin/vmdk) | VMware VMDK | Monolithic sparse disk images from VMware Workstation / ESXi |
-| [`vhdx`](https://github.com/SecurityRonin/vhdx) | Microsoft VHDX | Hyper-V, Windows 8+, WSL2, Azure disk container |
-| [`qcow2`](https://github.com/SecurityRonin/qcow2) | QCOW2 v2/v3 | QEMU / KVM / libvirt disk images |
-| [`ufed`](https://github.com/SecurityRonin/ufed) | Cellebrite UFED | Physical mobile device dumps with UFD XML segment mapping |
-| [`dd`](https://github.com/SecurityRonin/dd) | Raw / flat / gz | dd, dcfldd, and gzip-wrapped raw images |
-| [`iso9660-forensic`](https://github.com/SecurityRonin/iso9660-forensic) | ISO 9660 | Optical disc images: multi-session, UDF bridge, Rock Ridge, Joliet, El Torito |
-| [`dmg`](https://github.com/SecurityRonin/dmg) | Apple DMG / UDIF | macOS disk images with koly trailer, mish block tables, zlib decompression |
-| [`dar`](https://github.com/SecurityRonin/dar) | DAR archive | Disk ARchiver archives with catalog index and CRC32 validation |
-
-### Forensic analysers
-
-| Crate | Format | Notes |
-|-------|--------|-------|
-| [`ewf-forensic`](https://github.com/SecurityRonin/ewf-forensic) | E01 | Structural integrity audit, Adler-32 / MD5 hash verification, and in-memory repair |
-| [`vhdx-forensic`](https://github.com/SecurityRonin/vhdx-forensic) | VHDX | Forensic integrity analyser and in-memory repair tool for VHDX containers |
-
----
-
-[Privacy Policy](https://securityronin.github.io/vhd/privacy/) · [Terms of Service](https://securityronin.github.io/vhd/terms/) · © 2026 Security Ronin Ltd
+[Privacy Policy](https://securityronin.github.io/vhd-forensic/privacy/) · [Terms of Service](https://securityronin.github.io/vhd-forensic/terms/) · © 2026 Security Ronin Ltd
