@@ -22,6 +22,38 @@ Neither the artifact nor the size was authored by us — the artifact is dfvfs's
 answer key is qemu-img's. Dynamic VHDs give qemu a clean read, so `ntfs_dynamic.vhd`
 is the clean Tier-1 anchor.
 
+### Reference-implementation cross-check — libvhdi (`vhdiinfo`)
+
+The strongest oracle is **libvhdi** (Joachim Metz's reference VHD library, the one
+Plaso/dfvfs use), built from the 20251119 release. `vhdiinfo` media-size vs vhd-core:
+
+| Image | vhd-core | libvhdi | qemu-img | Verdict |
+|---|---|---|---|---|
+| `ntfs_dynamic.vhd` (real) | 4,194,304 | 4,194,304 | 4,194,304 | **all three agree** |
+| `ntfs_fixed.vhd` (real) | 4,194,304 | **4,194,304** | 4,194,816 (raw) | vhd-core matches the *reference*; qemu's raw read counts the footer as a sector |
+| `minimal.vhd` | 1,079,296 | 1,079,296 | 1,079,296 | agree |
+| `original-size-mismatch.vhd` (synthetic) | 2,123,776 (`CurrentSize`@48) | **1,061,888 (`OriginalSize`@40)** | 2,123,776 | the two references *disagree* — see below |
+
+On **every real VHD, libvhdi confirms vhd-core** — and on the fixed image vhd-core
+matches libvhdi *more closely than qemu* (qemu's raw-mode read over-counts by the
+512-byte footer).
+
+The disagreement is only on the synthetic `original-size-mismatch.vhd`, and it is
+instructive: I hand-edited **only** `OriginalSize`@40, leaving `CurrentSize`@48 and
+the dynamic-header BAT at qemu's 2 MiB. **vhd-core and qemu report `CurrentSize`@48
+(2,123,776) — which equals the BAT capacity, i.e. the bytes you can actually read;
+libvhdi reports `OriginalSize`@40 (1,061,888), the creation-time size.** For a
+*reader* exposing the virtual sector stream, the readable capacity (`CurrentSize`,
+matching the BAT) is the correct size — reading `OriginalSize` on a grown disk would
+truncate. So vhd-core's choice is right for its contract; libvhdi's `media size` is a
+different quantity (nominal creation size). Honest caveat: this synthetic image is an
+*inconsistent* state a real tool never emits (a real resize updates both fields and
+the header together), so it does not by itself adjudicate the semantics — the real-VHD
+agreement above is what carries the correctness claim.
+
+Reproduce: build `libvhdi` (`./configure && make`), then
+`vhditools/vhdiinfo core/tests/data/ntfs_dynamic.vhd` → `Media size: 4194304`.
+
 **Tier-2 — real qemu-minted images, qemu-img as oracle.** Genuine `qemu-img` (v11)
 output whose ground truth qemu-img itself reports:
 
