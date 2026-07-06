@@ -48,7 +48,10 @@ pub enum VhdIntegrityAnomaly {
     DataOffsetInconsistent { disk_type: u32, data_offset: u64 },
     /// Footer OriginalSize (offset 40) differs from CurrentSize (offset 48) — the
     /// disk was resized after creation (a History signal, not tampering).
-    SizeResized { original_size: u64, current_size: u64 },
+    SizeResized {
+        original_size: u64,
+        current_size: u64,
+    },
 }
 
 impl VhdIntegrityAnomaly {
@@ -166,12 +169,26 @@ pub fn audit(data: &[u8]) -> Vec<VhdIntegrityAnomaly> {
     }
 
     // Cookie @0.
-    if footer.get(OFF_COOKIE..OFF_COOKIE + 8) != Some(COOKIE.as_slice()) {
+    let cookie_ok = footer.get(OFF_COOKIE..OFF_COOKIE + 8) == Some(COOKIE.as_slice());
+    if !cookie_ok {
         let mut found = [0u8; 8];
         if let Some(s) = footer.get(OFF_COOKIE..OFF_COOKIE + 8) {
             found.copy_from_slice(s);
         }
         out.push(VhdIntegrityAnomaly::FooterCookieInvalid { found });
+    }
+
+    // OriginalSize@40 vs CurrentSize@48 — a resize signal. Only meaningful on a real
+    // footer, so gate on a valid cookie to avoid firing on garbage bytes.
+    if cookie_ok {
+        let original_size = be_u64(footer, OFF_ORIGINAL_SIZE);
+        let current_size = be_u64(footer, OFF_CURRENT_SIZE);
+        if original_size != current_size {
+            out.push(VhdIntegrityAnomaly::SizeResized {
+                original_size,
+                current_size,
+            });
+        }
     }
 
     // Checksum @64 — one's-complement over the footer with the field zeroed.
@@ -303,6 +320,10 @@ mod tests {
                 disk_type: 2,
                 data_offset: 0x1000,
             },
+            VhdIntegrityAnomaly::SizeResized {
+                original_size: 1,
+                current_size: 2,
+            },
         ];
         for a in &all {
             // to_finding drives every inherent method through the Observation impl
@@ -380,12 +401,18 @@ mod tests {
 
     #[test]
     fn size_resized_is_detected() {
-        assert!(has(&audit(&valid_with_sizes(1_048_576, 2_097_152)), "VHD-SIZE-RESIZED"));
+        assert!(has(
+            &audit(&valid_with_sizes(1_048_576, 2_097_152)),
+            "VHD-SIZE-RESIZED"
+        ));
     }
 
     #[test]
     fn equal_sizes_not_flagged_as_resized() {
-        assert!(!has(&audit(&valid_with_sizes(2_097_152, 2_097_152)), "VHD-SIZE-RESIZED"));
+        assert!(!has(
+            &audit(&valid_with_sizes(2_097_152, 2_097_152)),
+            "VHD-SIZE-RESIZED"
+        ));
     }
 
     #[test]
