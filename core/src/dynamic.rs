@@ -126,6 +126,35 @@ mod tests {
     }
 
     #[test]
+    fn header_end_beyond_data_is_out_of_bounds() {
+        // valid offset, but the header extends past the file.
+        assert!(matches!(
+            DynamicHeader::parse(&[0u8; 1000], 0),
+            Err(VhdError::BatOutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn header_bad_cookie_rejected() {
+        assert!(matches!(
+            DynamicHeader::parse(&[0u8; 1024], 0),
+            Err(VhdError::BadCookie)
+        ));
+    }
+
+    #[test]
+    fn block_index_beyond_bat_is_out_of_bounds() {
+        let bat = BlockAllocationTable {
+            entries: vec![BAT_ENTRY_UNUSED],
+            block_size: 512,
+        };
+        assert!(matches!(
+            bat.file_offset_for_byte(512 * 100),
+            Err(VhdError::BlockOutOfBounds)
+        ));
+    }
+
+    #[test]
     fn bat_parse_huge_entry_count_is_not_an_alloc_bomb() {
         // max_bat_entries claims 4 billion entries but the file is tiny → must
         // error out before allocating, not OOM.

@@ -141,10 +141,9 @@ impl forensicnomicon::report::Observation for VhdIntegrityAnomaly {
 #[must_use]
 pub fn audit(data: &[u8]) -> Vec<VhdIntegrityAnomaly> {
     let mut out = Vec::new();
-    let Some(footer) = data.get(data.len().saturating_sub(FOOTER_SIZE)..) else {
-        out.push(VhdIntegrityAnomaly::FooterTruncated { len: data.len() });
-        return out;
-    };
+    // Infallible: `n.saturating_sub(_) <= n`, so this slice never panics and is
+    // always `Some` — no dead guard arm to cover.
+    let footer = &data[data.len().saturating_sub(FOOTER_SIZE)..];
     if footer.len() < FOOTER_SIZE {
         out.push(VhdIntegrityAnomaly::FooterTruncated { len: data.len() });
         return out;
@@ -267,6 +266,36 @@ mod tests {
 
     fn has(anoms: &[VhdIntegrityAnomaly], code: &str) -> bool {
         anoms.iter().any(|a| a.code() == code)
+    }
+
+    #[test]
+    fn every_anomaly_is_a_graded_finding() {
+        use forensicnomicon::report::{Observation, Source};
+        let all = [
+            VhdIntegrityAnomaly::FooterTruncated { len: 10 },
+            VhdIntegrityAnomaly::FooterCookieInvalid {
+                found: *b"BADCOOK!",
+            },
+            VhdIntegrityAnomaly::FooterChecksumMismatch {
+                stored: 1,
+                computed: 2,
+            },
+            VhdIntegrityAnomaly::FileFormatVersionUnexpected { found: 0x0002_0000 },
+            VhdIntegrityAnomaly::DiskTypeUnknown { found: 99 },
+            VhdIntegrityAnomaly::SavedStateSet,
+            VhdIntegrityAnomaly::DataOffsetInconsistent {
+                disk_type: 2,
+                data_offset: 0x1000,
+            },
+        ];
+        for a in &all {
+            // to_finding drives every inherent method through the Observation impl
+            // (severity/category/code/significance, incl. hex8 for the cookie note).
+            let f = a.to_finding(Source::default());
+            assert!(!f.code.is_empty());
+            assert!(!f.note.is_empty());
+            assert!(f.severity.is_some());
+        }
     }
 
     #[test]

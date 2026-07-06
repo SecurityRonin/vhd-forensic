@@ -123,3 +123,67 @@ pub fn test_fixed_footer(virtual_size: u64) -> Vec<u8> {
 
     footer
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> Vec<u8> {
+        test_fixed_footer(1024)
+    }
+
+    #[test]
+    fn too_small_is_file_too_small() {
+        assert!(matches!(
+            VhdFooter::parse(&[0u8; 100]),
+            Err(VhdError::FileTooSmall)
+        ));
+    }
+
+    #[test]
+    fn bad_cookie_rejected() {
+        let mut f = base();
+        f[0] = b'X';
+        assert!(matches!(VhdFooter::parse(&f), Err(VhdError::BadCookie)));
+    }
+
+    #[test]
+    fn unsupported_version_rejected() {
+        let mut f = base();
+        f[12..16].copy_from_slice(&0x0002_0000u32.to_be_bytes());
+        assert!(matches!(
+            VhdFooter::parse(&f),
+            Err(VhdError::UnsupportedVersion(0x0002_0000))
+        ));
+    }
+
+    #[test]
+    fn differencing_rejected() {
+        let mut f = base();
+        f[60..64].copy_from_slice(&4u32.to_be_bytes());
+        assert!(matches!(
+            VhdFooter::parse(&f),
+            Err(VhdError::DifferencingNotSupported)
+        ));
+    }
+
+    #[test]
+    fn unknown_disk_type_rejected() {
+        let mut f = base();
+        f[60..64].copy_from_slice(&99u32.to_be_bytes());
+        assert!(matches!(
+            VhdFooter::parse(&f),
+            Err(VhdError::UnknownDiskType(99))
+        ));
+    }
+
+    #[test]
+    fn checksum_mismatch_rejected() {
+        let mut f = base();
+        f[100] ^= 0xFF; // reserved byte — cookie/version/type still valid
+        assert!(matches!(
+            VhdFooter::parse(&f),
+            Err(VhdError::ChecksumMismatch { .. })
+        ));
+    }
+}

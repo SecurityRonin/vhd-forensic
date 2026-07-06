@@ -1,0 +1,30 @@
+name: Release
+
+# Tag-driven library release: pushing a signed v* tag publishes vhd-core then
+# vhd-forensic to crates.io and cuts a GitHub Release. Bump the version first
+# (a version already on crates.io fails). The CARGO_REGISTRY_TOKEN is an org secret.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Publish (leaf first, wait for indexing)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p vhd-core
+          sleep 30
+          cargo publish -p vhd-forensic
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes --verify-tag

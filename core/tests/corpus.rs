@@ -51,3 +51,13 @@ fn corpus_fixed_vhd_opens_and_has_nonzero_size() {
         "virtual_disk_size must be > 0"
     );
 }
+
+#[test]
+fn dynamic_fixture_reports_dynamic_disk_type() {
+    let path = format!(
+        "{}/minimal.vhd",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data")
+    );
+    let reader = vhd::VhdReader::open(std::path::Path::new(&path)).expect("open");
+    assert_eq!(reader.disk_type(), vhd::DiskType::Dynamic);
+}
