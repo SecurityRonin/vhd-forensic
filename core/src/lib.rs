@@ -10,11 +10,14 @@
 //! - **Dynamic**: footer → dynamic header → Block Allocation Table (BAT)
 //!   → data blocks, with a copy of the footer at byte 0.
 
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 mod dynamic;
 mod error;
+mod read;
 
 #[cfg(feature = "test-helpers")]
 pub mod footer;

@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //! Forensic integrity analyzer for legacy VHD (Virtual PC / Hyper-V) disk images.
 //!
 //! `vhd-core` is a happy-path reader: it validates-and-discards the footer's

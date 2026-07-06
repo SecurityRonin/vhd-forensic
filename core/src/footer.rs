@@ -5,6 +5,7 @@
 //! Dynamic disks have a copy at byte 0 and the real footer at the very end.
 
 use crate::error::{Result, VhdError};
+use crate::read::{be_u32, be_u64};
 
 pub const FOOTER_SIZE: usize = 512;
 pub const COOKIE: &[u8; 8] = b"conectix";
@@ -40,20 +41,20 @@ impl VhdFooter {
         }
 
         // Version: bytes 12–15
-        let version = u32::from_be_bytes(footer[12..16].try_into().unwrap());
+        let version = be_u32(footer, 12);
         if version != CURRENT_VERSION {
             return Err(VhdError::UnsupportedVersion(version));
         }
 
         // DataOffset: bytes 16–23
-        let data_offset = u64::from_be_bytes(footer[16..24].try_into().unwrap());
+        let data_offset = be_u64(footer, 16);
 
         // CurrentSize (virtual disk size): bytes 48–55 (MS-VHD §2.1).
         // OriginalSize is bytes 40–47; the two differ on a resized disk.
-        let current_size = u64::from_be_bytes(footer[48..56].try_into().unwrap());
+        let current_size = be_u64(footer, 48);
 
         // DiskType: bytes 60–63
-        let disk_type_raw = u32::from_be_bytes(footer[60..64].try_into().unwrap());
+        let disk_type_raw = be_u32(footer, 60);
         let disk_type = match disk_type_raw {
             2 => DiskType::Fixed,
             3 => DiskType::Dynamic,
@@ -62,7 +63,7 @@ impl VhdFooter {
         };
 
         // Checksum: bytes 64–67
-        let stored_checksum = u32::from_be_bytes(footer[64..68].try_into().unwrap());
+        let stored_checksum = be_u32(footer, 64);
         let computed = checksum(footer);
         if stored_checksum != computed {
             return Err(VhdError::ChecksumMismatch {

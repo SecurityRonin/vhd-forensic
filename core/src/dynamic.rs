@@ -1,6 +1,8 @@
 //! Dynamic VHD Block Allocation Table (BAT) parsing (MS-VHD §2.3).
 
 use crate::error::{Result, VhdError};
+use crate::read::be_u32;
+use crate::read::be_u64;
 
 pub const DYNAMIC_HEADER_COOKIE: &[u8; 8] = b"cxsparse";
 pub const DYNAMIC_HEADER_SIZE: usize = 1024;
@@ -36,9 +38,9 @@ impl DynamicHeader {
         if &hdr[0..8] != DYNAMIC_HEADER_COOKIE {
             return Err(VhdError::BadCookie);
         }
-        let bat_offset = u64::from_be_bytes(hdr[16..24].try_into().unwrap());
-        let block_size = u32::from_be_bytes(hdr[32..36].try_into().unwrap());
-        let max_bat_entries = u32::from_be_bytes(hdr[28..32].try_into().unwrap());
+        let bat_offset = be_u64(hdr, 16);
+        let block_size = be_u32(hdr, 32);
+        let max_bat_entries = be_u32(hdr, 28);
         if block_size == 0 {
             return Err(VhdError::InvalidBlockSize);
         }
@@ -69,7 +71,7 @@ impl BlockAllocationTable {
             return Err(VhdError::BatOutOfBounds);
         }
         let entries = (0..entry_count)
-            .map(|i| u32::from_be_bytes(data[start + i * 4..start + i * 4 + 4].try_into().unwrap()))
+            .map(|i| be_u32(data, start + i * 4))
             .collect();
         Ok(BlockAllocationTable {
             entries,

@@ -15,8 +15,13 @@ repository = "https://github.com/SecurityRonin/vhd-forensic"
 thiserror = "2"
 tempfile  = "3"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.lints.clippy]
 pedantic                 = { level = "warn", priority = -1 }
+unwrap_used              = "deny"
+expect_used              = "deny"
 module_name_repetitions  = "allow"
 must_use_candidate       = "allow"
 missing_errors_doc       = "allow"
