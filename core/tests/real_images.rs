@@ -86,3 +86,23 @@ fn ntfs_fixed_vhd_seek_and_read_stable() {
     reader.read_exact(&mut b).expect("second read");
     assert_eq!(a, b, "repeated reads at offset 0 must be identical");
 }
+
+// ── original-size-mismatch.vhd (dynamic; OriginalSize@40 ≠ CurrentSize@48) ────
+//
+// A real qemu-img dynamic VHD whose *CurrentSize* (offset 48) is untouched at
+// 2,123,776 (qemu-img reports exactly this), with only *OriginalSize* (offset 40)
+// injected to a distinct 1,061,888 — the shape a resized disk has. The reader must
+// return the CURRENT (virtual) size from offset 48, matching qemu-img, NOT the
+// original from offset 40. qemu-img is the independent oracle. See tests/data/README.md.
+
+#[test]
+fn current_size_read_from_offset_48_not_40() {
+    let path = format!("{DATA_DIR}/original-size-mismatch.vhd");
+    let reader = vhd::VhdReader::open(Path::new(&path)).expect("mismatch.vhd must open");
+    assert_eq!(
+        reader.virtual_disk_size(),
+        2_123_776,
+        "current_size must come from footer offset 48 (qemu-img's virtual size), \
+         not offset 40 (OriginalSize)"
+    );
+}
