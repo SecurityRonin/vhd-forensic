@@ -126,3 +126,25 @@ fn dfvfs_dynamic_vhd_matches_reference_oracle() {
     );
     assert_eq!(reader.disk_type(), vhd::DiskType::Dynamic);
 }
+
+
+// Expose BOTH sizes: current (readable capacity, offset 48) and original (creation
+// size, offset 40). Each is validated by a different reference oracle — qemu-img
+// reports current 2,123,776; libvhdi reports original 1,061,888. Original != current
+// is a forensic resize signal.
+#[test]
+fn exposes_both_current_and_original_size() {
+    let path = format!("{DATA_DIR}/original-size-mismatch.vhd");
+    let r = vhd::VhdReader::open(Path::new(&path)).expect("open");
+    assert_eq!(r.virtual_disk_size(), 2_123_776, "current size (offset 48, qemu oracle)");
+    assert_eq!(r.original_size(), 1_061_888, "original size (offset 40, libvhdi oracle)");
+}
+
+#[test]
+fn real_vhd_original_equals_current() {
+    // A real (un-resized) VHD has original == current; both reference tools agree.
+    let path = format!("{DATA_DIR}/ntfs_dynamic.vhd");
+    let r = vhd::VhdReader::open(Path::new(&path)).expect("open");
+    assert_eq!(r.original_size(), r.virtual_disk_size());
+    assert_eq!(r.original_size(), 4_194_304);
+}
