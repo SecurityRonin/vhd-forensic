@@ -21,9 +21,13 @@ path = "src/lib.rs"
 [features]
 # Expose test helper constructors for use in downstream crate tests.
 test-helpers = []
+# forensic-vfs ImageSource contract (optional): present a decoded VHD as a
+# read-only positioned-read byte source. Behind the `vfs` feature (ADR 0004).
+vfs = ["dep:forensic-vfs"]
 
 [dependencies]
 thiserror = { workspace = true }
+forensic-vfs = { version = "0.1", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
