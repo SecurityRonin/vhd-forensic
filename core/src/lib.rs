@@ -24,6 +24,9 @@ pub mod footer;
 #[cfg(not(feature = "test-helpers"))]
 mod footer;
 
+#[cfg(feature = "vfs")]
+pub mod vfs;
+
 pub use error::VhdError;
 pub use footer::{DiskType, VhdFooter};
 
