@@ -27,7 +27,7 @@ vfs = ["dep:forensic-vfs"]
 
 [dependencies]
 thiserror = { workspace = true }
-forensic-vfs = { version = "0.2", optional = true }
+forensic-vfs = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
