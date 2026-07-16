@@ -5,7 +5,7 @@ name: Release
 # (a version already on crates.io fails). The CARGO_REGISTRY_TOKEN is an org secret.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]*"]
 
 permissions:
   contents: write
