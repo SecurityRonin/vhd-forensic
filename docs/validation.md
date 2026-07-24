@@ -82,6 +82,54 @@ is a real qemu VHD whose `CurrentSize` (offset 48) is left untouched at qemu's
 it. Before the fix it returned 1,061,888; after, 2,123,776. This is a value-producing
 decoder cross-checked by a tool that decodes the same bytes independently.
 
+## Corpus validation (Tier-1) — byte-level differential reads
+
+Beyond the single `virtual_disk_size` value, `VhdReader`'s **sector byte stream**
+is validated byte-for-byte against `qemu-img convert -O raw` (QEMU 11.0.0,
+macOS/Apple Silicon) — a full-stride differential read, not just a size check.
+Rust toolchain per `rust-toolchain.toml`.
+
+The `ntfs_fixed.vhd` anchor is a **Windows/Hyper-V-authored** fixed VHD
+(`creator_app = b'win '`, version `0x000A0000` = Windows 10 / Hyper-V), SHA-256
+`797a3a1ffb1966b634bef79bf4b1e93641545cce8560b1f81d8d2c3f84b00de2`, from the
+log2timeline/dfvfs corpus (Apache-2.0) — a genuine cross-implementation footer,
+not qemu-generated. Provenance for every fixture lives in `core/tests/data/README.md`.
+
+| Test | Image | What it exercises | Result |
+|---|---|---|---|
+| `corpus_dfvfs_ntfs_fixed_vhd_reads_match_qemu_raw_convert` | `ntfs_fixed.vhd` (Windows/Hyper-V) | fixed-image footer parse + direct sector reads over a Microsoft-authored footer | **PASS** |
+| `corpus_minimal_vhd_reads_match_qemu_raw_convert` | `minimal.vhd` (dynamic, qemu) | BAT lookup, dynamic block bitmap skip (+512), block data reads, unallocated → zeros | **PASS** |
+| `corpus_fixed_vhd_reads_match_qemu_raw_convert` | `fixed.vhd` (fixed, qemu) | fixed-image direct sector reads (no BAT), footer-only header parse | **PASS** |
+
+Each test does a full byte scan at 64 KiB stride plus a near-end read and compares
+against the qemu raw conversion.
+
+### Differential coverage
+
+| Feature | Covered | Notes |
+|---|---|---|
+| Dynamic VHD (BAT + blocks) | Yes | `minimal.vhd` (qemu) |
+| Fixed VHD (raw + footer) | Yes | `fixed.vhd` (qemu) + `ntfs_fixed.vhd` (Windows) |
+| Windows/Hyper-V-created VHD | Yes | `ntfs_fixed.vhd` (third-party) |
+| Unallocated blocks (zeros) | Yes | `minimal.vhd` sparse regions |
+| Block bitmap skip (computed from `block_size`) | Yes | computed per spec, not hardcoded +512 |
+| One's-complement checksum | Yes | parsed and validated on open |
+| Differencing VHD | No | not in current corpus |
+| CHS geometry rounding quirk | Yes (implicit) | qemu uses `file_size/512`; reader matches |
+
+The fixed-VHD ±512 footer-as-sector caveat (qemu's `vpc` driver counts the footer
+in the raw size) is discussed under Reader correctness above and in
+`docs/implementation-notes.md`; the reader uses `CurrentSize` and the byte reads
+still reconcile.
+
+Reproduce:
+
+```sh
+qemu-img create -f vpc core/tests/data/minimal.vhd 1M
+qemu-img create -f vpc -o subformat=fixed core/tests/data/fixed.vhd 1M
+cargo test
+```
+
 ## Panic-free posture — fuzzing + no-panic tests
 
 `vhd-core` and `vhd-forensic` parse attacker-controllable images, so they meet the
