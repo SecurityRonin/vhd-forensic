@@ -1,1 +1,4 @@
-/target/
+# Unanchored: `fuzz/` is a nested cargo package and gets its own `target/`.
+# A leading-slash pattern matches the repo root only, which is how build
+# artifacts got committed.
+target/
