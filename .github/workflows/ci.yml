@@ -6,45 +6,35 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
-  RUSTFLAGS: -Dwarnings
+permissions:
+  contents: read
 
 jobs:
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --check
+  ci:
+    uses: SecurityRonin/fleet-ci/.github/workflows/rust-ci.yml@619094ad54edc586f5c2733358e00326b30790bd
+    with:
+      # The old MSRV job ran `cargo test` at 1.85, not a bare build. The
+      # default (`build`) would verify strictly less than CI already did, so
+      # this carries the existing decision across rather than relaxing it.
+      msrv-check: test
+      # The repo's coverage gate is carried below VERBATIM instead of using the
+      # shared one, because the two cannot be reconciled through a single
+      # `all-features` input: the old test job runs `--all-features` while the
+      # old coverage job deliberately does NOT. Measured both ways on this
+      # tree with the shared workflow's own per-line rules:
+      #   cargo llvm-cov --workspace                 --ignore-filename-regex '/tests/|/fuzz/'  -> 0 uncovered
+      #   cargo llvm-cov --workspace --all-features  --ignore-filename-regex '/tests/|/fuzz/'  -> 3 uncovered
+      #     (core/src/vfs.rs:64, :90, :91 — behind the `vfs` feature, which the
+      #      existing gate never compiles, let alone measures)
+      # Turning the shared gate on would therefore go red on lines no gate has
+      # ever asked anyone to cover. Migrating to `coverage-gate: strict` is a
+      # real coverage decision and belongs in its own PR.
+      coverage-gate: "off"
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
-      - run: cargo clippy --all-targets -- -D warnings
-
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
-      - run: cargo test --workspace --all-features
+  # -- carried across verbatim from the previous ci.yml ---------------------
+  # Repo-specific jobs the shared workflow does not model. Unchanged, including
+  # their own apt steps: qemu-utils lives HERE (coverage + corpus), not in the
+  # test job, so it is deliberately not passed as `system-packages`.
 
   coverage:
     name: Coverage (100% production lines)
@@ -85,22 +75,6 @@ jobs:
           print("100% production line coverage — no uncovered DA:n,0")
           PY
 
-  deny:
-    name: Cargo Deny
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-
-  msrv:
-    name: MSRV (1.85)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@c56a35af9328d0bc581dc86c05e58f97f7c38a0e # 1.85
-      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
-      - run: cargo test
-
   corpus:
     name: Corpus (real-world images)
     runs-on: ubuntu-latest
@@ -124,34 +98,6 @@ jobs:
           CORPUS_DIR: ${{ github.workspace }}/corpus
         run: cargo test --test corpus -- --nocapture
 
-  fuzz-check:
-    name: Fuzz (build check)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      # fuzz needs nightly `-Z` flags; force nightly so the rust-toolchain.toml pin
-      # (stable) can't override it (a `+toolchain` on the command line beats the toml).
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-      - run: cargo install cargo-fuzz --locked
-      - run: cargo +nightly fuzz build
-
-  secrets:
-    name: Secret Scan (gitleaks)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-      - name: Install gitleaks
-        run: |
-          VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r '.tag_name[1:]')
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
-            | tar xz -C /tmp gitleaks
-      - name: Run gitleaks
-        run: /tmp/gitleaks detect --source .
-
   geiger:
     name: Unsafe Audit (cargo-geiger)
     runs-on: ubuntu-latest
@@ -162,18 +108,3 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
       - run: cargo install cargo-geiger --locked
       - run: cargo geiger 2>&1 || true
-
-  vet:
-    name: Cargo Vet (supply-chain)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - name: Install cargo-vet
-        uses: taiki-e/install-action@59012be0884e296ca2da49b530610e72c49039ad # v2.81.6
-        with:
-          tool: cargo-vet
-      - name: Fetch dependencies
-        run: cargo fetch
-      - name: Check supply chain
-        run: cargo vet --locked
